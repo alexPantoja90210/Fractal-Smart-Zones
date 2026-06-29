@@ -88,28 +88,42 @@ f_structure(pivot_len) =>
     ph = ta.pivothigh(high, pivot_len, pivot_len)
     pl = ta.pivotlow (low,  pivot_len, pivot_len)
 
-    var float last_ph     = na
-    var float prev_ph     = na
-    var int   last_ph_bar = na
-    var float last_pl     = na
-    var float prev_pl     = na
-    var int   last_pl_bar = na
+    var float last_ph      = na
+    var float prev_ph      = na
+    var int   last_ph_bar  = na   // bar_index real donde ocurrió el pivot high
+    var float last_ph_bar_high = na  // precio high de la vela OB bajista (vela previa al PH)
+    var float last_ph_bar_low  = na  // precio low  de la vela OB bajista
+    var float last_pl      = na
+    var float prev_pl      = na
+    var int   last_pl_bar  = na   // bar_index real donde ocurrió el pivot low
+    var float last_pl_bar_high = na  // precio high de la vela OB alcista (vela previa al PL)
+    var float last_pl_bar_low  = na  // precio low  de la vela OB alcista
 
     if not na(ph)
-        prev_ph     := last_ph
-        last_ph     := ph
-        last_ph_bar := bar_index - pivot_len
+        prev_ph          := last_ph
+        last_ph          := ph
+        last_ph_bar      := bar_index - pivot_len
+        // OB bajista: vela justo antes del swing high (pivot_len + 1 barras atrás)
+        last_ph_bar_high := high[pivot_len + 1]
+        last_ph_bar_low  := low [pivot_len + 1]
 
     if not na(pl)
-        prev_pl     := last_pl
-        last_pl     := pl
-        last_pl_bar := bar_index - pivot_len
+        prev_pl          := last_pl
+        last_pl          := pl
+        last_pl_bar      := bar_index - pivot_len
+        // OB alcista: vela justo antes del swing low (pivot_len + 1 barras atrás)
+        last_pl_bar_high := high[pivot_len + 1]
+        last_pl_bar_low  := low [pivot_len + 1]
 
-    has_pivots    = not na(last_ph) and not na(prev_ph) and not na(last_pl) and not na(prev_pl)
-    bull_str      = has_pivots and last_ph > prev_ph and last_pl > prev_pl
-    bear_str      = has_pivots and last_ph < prev_ph and last_pl < prev_pl
+    has_pivots = not na(last_ph) and not na(prev_ph) and not na(last_pl) and not na(prev_pl)
+    bull_str   = has_pivots and last_ph > prev_ph and last_pl > prev_pl
+    bear_str   = has_pivots and last_ph < prev_ph and last_pl < prev_pl
 
-    [ph, pl, last_ph, prev_ph, last_ph_bar, last_pl, prev_pl, last_pl_bar, bull_str, bear_str]
+    [ph, pl, last_ph, prev_ph, last_ph_bar,
+     last_ph_bar_high, last_ph_bar_low,
+     last_pl, prev_pl, last_pl_bar,
+     last_pl_bar_high, last_pl_bar_low,
+     bull_str, bear_str]
 
 // ───────────────────────────────────────────────────────────────
 // f_fib_zone(last_ph, last_pl, bull_str, bear_str, fib_lo, fib_hi)
@@ -143,23 +157,22 @@ f_fib_zone(last_ph, last_pl, bull_str, bear_str, fib_lo, fib_hi) =>
 //   Retorna: [in_ob_bull, in_ob_bear, ob_hi, ob_lo, score]
 //     score = 1 si hay confluencia, 0 si no
 // ───────────────────────────────────────────────────────────────
-f_ob_conf(enabled, bull_str, bear_str, last_pl_bar, last_ph_bar, fib_lo_val, fib_hi_val) =>
-    ob_bull_hi = na(last_pl_bar) ? na : high[bar_index - last_pl_bar + 1]
-    ob_bull_lo = na(last_pl_bar) ? na : low [bar_index - last_pl_bar + 1]
-    ob_bear_hi = na(last_ph_bar) ? na : high[bar_index - last_ph_bar + 1]
-    ob_bear_lo = na(last_ph_bar) ? na : low [bar_index - last_ph_bar + 1]
-
-    in_bull = enabled and bull_str and not na(ob_bull_hi) and
+f_ob_conf(enabled, bull_str, bear_str,
+          pl_ob_hi, pl_ob_lo, ph_ob_hi, ph_ob_lo,
+          fib_lo_val, fib_hi_val) =>
+    // Los precios del OB se capturan en f_structure en el momento exacto
+    // del pivot, evitando lookbacks con bar_index que fallan en TF altos.
+    in_bull = enabled and bull_str and not na(pl_ob_hi) and
               close >= fib_lo_val and close <= fib_hi_val and
-              close >= ob_bull_lo and close <= ob_bull_hi
+              close >= pl_ob_lo   and close <= pl_ob_hi
 
-    in_bear = enabled and bear_str and not na(ob_bear_hi) and
+    in_bear = enabled and bear_str and not na(ph_ob_hi) and
               close >= fib_lo_val and close <= fib_hi_val and
-              close >= ob_bear_lo and close <= ob_bear_hi
+              close >= ph_ob_lo   and close <= ph_ob_hi
 
-    ob_hi   = in_bull ? ob_bull_hi : in_bear ? ob_bear_hi : na
-    ob_lo   = in_bull ? ob_bull_lo : in_bear ? ob_bear_lo : na
-    score   = (in_bull or in_bear) ? 1 : 0
+    ob_hi = in_bull ? pl_ob_hi : in_bear ? ph_ob_hi : na
+    ob_lo = in_bull ? pl_ob_lo : in_bear ? ph_ob_lo : na
+    score = (in_bull or in_bear) ? 1 : 0
 
     [in_bull, in_bear, ob_hi, ob_lo, score]
 
@@ -318,10 +331,7 @@ f_risk_levels(entry, last_pl, last_ph, atr_val, rr1, rr2) =>
 //   Retorna: string (ej. "OB FVG EMA")
 // ───────────────────────────────────────────────────────────────
 f_conf_label(ob, fvg, piv, ema) =>
-    (ob  > 0 ? "OB "    : "") +
-    (fvg > 0 ? "FVG "   : "") +
-    (piv > 0 ? "PIVOT " : "") +
-    (ema > 0 ? "EMA"    : "")
+    (ob  > 0 ? "OB "    : "") +    (fvg > 0 ? "FVG "   : "") +    (piv > 0 ? "PIVOT " : "") +    (ema > 0 ? "EMA"    : "")
 
 // ───────────────────────────────────────────────────────────────
 // f_price(p)
@@ -347,18 +357,19 @@ f_pips(entry, nivel) =>
 // — Estructura & fractales
 [ph, pl,
  last_ph, _prev_ph, last_ph_bar,
+ last_ph_ob_hi, last_ph_ob_lo,
  last_pl, _prev_pl, last_pl_bar,
+ last_pl_ob_hi, last_pl_ob_lo,
  bull_str, bear_str] = f_structure(i_pivot_len)
 
 // — Zona Fibonacci
 [fib_hi_val, fib_lo_val] = f_fib_zone(last_ph, last_pl, bull_str, bear_str, i_fib_lo, i_fib_hi)
 
 // — Precio en zona (condición base compartida por confluencias)
-price_in_zone = not na(fib_hi_val) and not na(fib_lo_val) and
-                close >= fib_lo_val and close <= fib_hi_val
+price_in_zone = not na(fib_hi_val) and not na(fib_lo_val) and                close >= fib_lo_val and close <= fib_hi_val
 
 // — Confluencias
-[in_ob_bull, in_ob_bear, ob_hi, ob_lo, ob_score]      = f_ob_conf   (i_use_ob,    bull_str, bear_str, last_pl_bar, last_ph_bar, fib_lo_val, fib_hi_val)
+[in_ob_bull, in_ob_bear, ob_hi, ob_lo, ob_score]      = f_ob_conf   (i_use_ob,    bull_str, bear_str, last_pl_ob_hi, last_pl_ob_lo, last_ph_ob_hi, last_ph_ob_lo, fib_lo_val, fib_hi_val)
 [in_fvg_bull, in_fvg_bear, fvg_hi, fvg_lo, fvg_score] = f_fvg_conf  (i_use_fvg,   bull_str, bear_str, fib_lo_val, fib_hi_val)
 piv_score                                               = f_pivot_conf(i_use_pivot, fib_lo_val, fib_hi_val)
 [ema21, ema50, ema_score]                               = f_trend_conf(i_use_trend, bull_str, bear_str, fib_lo_val, fib_hi_val)
@@ -387,13 +398,20 @@ atr = ta.atr(14)
 
 // Zona Fibonacci
 // Color naranja (bull_str = compra) | amarillo (bear_str = venta)
+// Se redibuja SOLO cuando aparece un nuevo pivot (ph o pl), no en cada barra.
+// Esto garantiza que los límites del box correspondan al fractal real,
+// sin desplazarse con bar_index en TF altos como D y 4H.
 fib_bg     = bull_str ? color.new(color.orange, 80) : color.new(color.yellow, 80)
 fib_border = bull_str ? color.orange : color.yellow
 var box fib_box = na
-if bull_str or bear_str
+new_pivot  = not na(ph) or not na(pl)   // solo true en la barra donde se confirma un pivot
+if new_pivot and (bull_str or bear_str)
     if not na(fib_hi_val) and not na(fib_lo_val)
         box.delete(fib_box)
-        fib_box := box.new(bar_index - 50, fib_hi_val, bar_index + 30,
+        // left = bar donde ocurrió el último swing relevante
+        // right = proyección fija de 50 barras hacia adelante
+        fib_left  = bull_str ? last_pl_bar : last_ph_bar
+        fib_box  := box.new(fib_left, fib_hi_val, bar_index + 50,
              fib_lo_val, border_color=fib_border, bgcolor=fib_bg, border_width=1)
 
 // Order Block
