@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 // ║   Fractal Smart Zonez — by Alex Pantoja                     ║
-// ║   Pine Script v5  |  Versión 5.0 — Probabilidad de éxito   ║
+// ║   Pine Script v5  |  Versión 15.0 — Panel activo con guards de variables   ║
 // ╠══════════════════════════════════════════════════════════════╣
 // ║  ESTRUCTURA DEL SCRIPT                                       ║
 // ║  ① INPUTS          — Parámetros configurables               ║
@@ -27,7 +27,7 @@
 // ╚══════════════════════════════════════════════════════════════╝
 
 //@version=5
-indicator("Fractal Smart Zonez – Alex Pantoja", shorttitle="FSZ·AP v5",
+indicator("Fractal Smart Zonez – Alex Pantoja", shorttitle="FSZ·AP v15",
      overlay=true, max_lines_count=300, max_boxes_count=150,
      max_labels_count=200)
 
@@ -86,31 +86,10 @@ C_BOX2  = color.new(#00C7BE, 88)
 //   bear_structure = LH + LL  →  tendencia bajista
 // ───────────────────────────────────────────────────────────────
 f_structure(pivot_len) =>
+    // Solo detección raw. Todo el tracking en scope global.
     ph = ta.pivothigh(high, pivot_len, pivot_len)
     pl = ta.pivotlow (low,  pivot_len, pivot_len)
-
-    var float last_ph     = na
-    var float prev_ph     = na
-    var int   last_ph_bar = na
-    var float last_pl     = na
-    var float prev_pl     = na
-    var int   last_pl_bar = na
-
-    if not na(ph)
-        prev_ph     := last_ph
-        last_ph     := ph
-        last_ph_bar := bar_index - pivot_len
-
-    if not na(pl)
-        prev_pl     := last_pl
-        last_pl     := pl
-        last_pl_bar := bar_index - pivot_len
-
-    has_pivots    = not na(last_ph) and not na(prev_ph) and not na(last_pl) and not na(prev_pl)
-    bull_str      = has_pivots and last_ph > prev_ph and last_pl > prev_pl
-    bear_str      = has_pivots and last_ph < prev_ph and last_pl < prev_pl
-
-    [ph, pl, last_ph, prev_ph, last_ph_bar, last_pl, prev_pl, last_pl_bar, bull_str, bear_str]
+    [ph, pl]
 
 // ───────────────────────────────────────────────────────────────
 // f_fib_zone(last_ph, last_pl, bull_str, bear_str, fib_lo, fib_hi)
@@ -118,19 +97,26 @@ f_structure(pivot_len) =>
 //   (retroceso 50%–61.8%) sobre el último fractal activo.
 //   Retorna: [fib_hi_val, fib_lo_val]
 // ───────────────────────────────────────────────────────────────
-f_fib_zone(last_ph, last_pl, bull_str, bear_str, fib_lo, fib_hi) =>
+f_fib_zone(last_ph, last_pl, is_bull, is_bear, fib_lo, fib_hi) =>
+    // Calcula zona dorada 50–61.8% sobre el último fractal activo.
+    // Parámetros is_bull / is_bear vienen de g_fib_is_bull/bear
+    // (no de bull_str/bear_str) para garantizar valores siempre presentes.
     rango = last_ph - last_pl
 
-    // Alcista: precio retrocede desde PH hacia abajo
-    zone_hi_bull = last_ph - rango * fib_lo
-    zone_lo_bull = last_ph - rango * fib_hi
+    // BULL: retroceso bajista sobre impulso alcista (PL→PH)
+    //   fib_hi = 50%  (borde superior, retroceso menor)
+    //   fib_lo = 61.8% (borde inferior, retroceso mayor)
+    zone_hi_bull = last_ph - rango * fib_lo   // 50%  desde PH
+    zone_lo_bull = last_ph - rango * fib_hi   // 61.8% desde PH
 
-    // Bajista: precio retrocede desde PL hacia arriba
-    zone_hi_bear = last_pl + rango * fib_hi
-    zone_lo_bear = last_pl + rango * fib_lo
+    // BEAR: retroceso alcista sobre impulso bajista (PH→PL)
+    //   fib_hi = 61.8% (borde superior, retroceso mayor = más cerca de PH)
+    //   fib_lo = 50%  (borde inferior, retroceso menor)
+    zone_hi_bear = last_pl + rango * fib_hi   // 61.8% desde PL
+    zone_lo_bear = last_pl + rango * fib_lo   // 50%  desde PL
 
-    fib_hi_val = bull_str ? zone_hi_bull : bear_str ? zone_hi_bear : na
-    fib_lo_val = bull_str ? zone_lo_bull : bear_str ? zone_lo_bear : na
+    fib_hi_val = is_bull ? zone_hi_bull : is_bear ? zone_hi_bear : na
+    fib_lo_val = is_bull ? zone_lo_bull : is_bear ? zone_lo_bear : na
 
     [fib_hi_val, fib_lo_val]
 
@@ -299,18 +285,25 @@ f_rejection() =>
 //   Retorna (short): [sl_short, tp1_short, tp2_short]
 // ───────────────────────────────────────────────────────────────
 f_risk_levels(entry, last_pl, last_ph, atr_val, rr1, rr2) =>
-    sl_long  = last_pl - atr_val * 0.3
-    sl_short = last_ph + atr_val * 0.3
+    // Guards: si los pivots o atr no están disponibles, retornar na
+    // para que panel_vars_ok los detecte y no dibuje el panel.
+    if na(last_pl) or na(last_ph) or na(atr_val) or na(entry)
+        [float(na), float(na), float(na), float(na), float(na), float(na)]
+    else
+        sl_long  = last_pl - atr_val * 0.3
+        sl_short = last_ph + atr_val * 0.3
 
-    risk_long  = entry - sl_long
-    risk_short = sl_short - entry
+        risk_long  = entry - sl_long
+        risk_short = sl_short - entry
 
-    tp1_long   = entry + risk_long  * rr1
-    tp2_long   = entry + risk_long  * rr2
-    tp1_short  = entry - risk_short * rr1
-    tp2_short  = entry - risk_short * rr2
+        // Guard adicional: si el riesgo es cero o negativo (precios invertidos),
+        // no calcular TPs para evitar labels en precios absurdos.
+        tp1_long   = risk_long  > 0 ? entry + risk_long  * rr1 : float(na)
+        tp2_long   = risk_long  > 0 ? entry + risk_long  * rr2 : float(na)
+        tp1_short  = risk_short > 0 ? entry - risk_short * rr1 : float(na)
+        tp2_short  = risk_short > 0 ? entry - risk_short * rr2 : float(na)
 
-    [sl_long, tp1_long, tp2_long, sl_short, tp1_short, tp2_short]
+        [sl_long, tp1_long, tp2_long, sl_short, tp1_short, tp2_short]
 
 // ───────────────────────────────────────────────────────────────
 // f_conf_label(ob, fvg, piv, ema)
@@ -420,14 +413,82 @@ f_probability(bull_str, bear_str, price_in_zone,
 // ④ EJECUCIÓN — Llama funciones y almacena resultados
 // ═══════════════════════════════════════════════════════════════
 
-// — Estructura & fractales
-[ph, pl,
- last_ph, _prev_ph, last_ph_bar,
- last_pl, _prev_pl, last_pl_bar,
- bull_str, bear_str] = f_structure(i_pivot_len)
+// ── Pivots raw ──────────────────────────────────────────────────
+[ph, pl] = f_structure(i_pivot_len)
 
-// — Zona Fibonacci
-[fib_hi_val, fib_lo_val] = f_fib_zone(last_ph, last_pl, bull_str, bear_str, i_fib_lo, i_fib_hi)
+// ── Tracking global (var en scope raíz = sin desfase de 1 barra)
+var float g_last_ph     = na
+var float g_prev_ph     = na
+var int   g_last_ph_bar = na
+var float g_last_pl     = na
+var float g_prev_pl     = na
+var int   g_last_pl_bar = na
+
+if not na(pl)
+    g_prev_pl     := g_last_pl
+    g_last_pl     := pl
+    g_last_pl_bar := bar_index - i_pivot_len
+
+if not na(ph)
+    g_prev_ph     := g_last_ph
+    g_last_ph     := ph
+    g_last_ph_bar := bar_index - i_pivot_len
+
+// ── Estructura HH+HL / LH+LL (señales y confluencias)
+g_has_piv = not na(g_last_ph) and not na(g_prev_ph) and          not na(g_last_pl) and not na(g_prev_pl)
+bull_str  = g_has_piv and g_last_ph > g_prev_ph and g_last_pl > g_prev_pl
+bear_str  = g_has_piv and g_last_ph < g_prev_ph and g_last_pl < g_prev_pl
+
+last_ph     = g_last_ph
+last_pl     = g_last_pl
+last_ph_bar = g_last_ph_bar
+last_pl_bar = g_last_pl_bar
+
+// ── Dirección y extremos FIJOS del fib ─────────────────────────
+// Los extremos del fib (fib_anchor_hi / fib_anchor_lo) se fijan
+// en el momento en que se detecta la dirección (bull_str/bear_str)
+// y solo se actualizan si la dirección cambia o si el impulso activo
+// extiende su extremo (nuevo PH más alto en bull, nuevo PL más bajo en bear).
+// Esto evita que mini-correcciones dentro del impulso muevan el fib.
+
+var float fib_anchor_hi     = na   // extremo alto fijo del fractal activo
+var float fib_anchor_lo     = na   // extremo bajo fijo del fractal activo
+var int   fib_anchor_hi_bar = na
+var int   fib_anchor_lo_bar = na
+var int   fib_dir           = 0    // 1=bull, -1=bear, 0=neutro
+
+// Calcular dirección actual con HH+HL / LH+LL
+g_fib_is_bull = bull_str
+g_fib_is_bear = bear_str
+
+// Actualizar anclas solo al confirmar nueva dirección
+if bull_str and fib_dir != 1
+    // Nueva estructura alcista: anclar al último PL (base) y PH (pico)
+    fib_anchor_lo     := g_last_pl
+    fib_anchor_lo_bar := g_last_pl_bar
+    fib_anchor_hi     := g_last_ph
+    fib_anchor_hi_bar := g_last_ph_bar
+    fib_dir           := 1
+
+if bear_str and fib_dir != -1
+    // Nueva estructura bajista: anclar al último PH (pico) y PL (fondo)
+    fib_anchor_hi     := g_last_ph
+    fib_anchor_hi_bar := g_last_ph_bar
+    fib_anchor_lo     := g_last_pl
+    fib_anchor_lo_bar := g_last_pl_bar
+    fib_dir           := -1
+
+// Extender extremo si el impulso activo alcanza nuevo máximo/mínimo
+if fib_dir == 1 and not na(ph) and ph > fib_anchor_hi
+    fib_anchor_hi     := ph
+    fib_anchor_hi_bar := bar_index - i_pivot_len
+
+if fib_dir == -1 and not na(pl) and pl < fib_anchor_lo
+    fib_anchor_lo     := pl
+    fib_anchor_lo_bar := bar_index - i_pivot_len
+
+// ── Zona Fibonacci sobre anclas fijas ───────────────────────────
+[fib_hi_val, fib_lo_val] = f_fib_zone(fib_anchor_hi, fib_anchor_lo, g_fib_is_bull, g_fib_is_bear, i_fib_lo, i_fib_hi)
 
 // — Precio en zona (condición base compartida por confluencias)
 price_in_zone = not na(fib_hi_val) and not na(fib_lo_val) and                close >= fib_lo_val and close <= fib_hi_val
@@ -467,13 +528,92 @@ atr = ta.atr(14)
 // ⑤ DIBUJO DE ZONAS (Fib box, OB box, FVG box)
 // ═══════════════════════════════════════════════════════════════
 
-// Zona Fibonacci
-var box fib_box = na
-if bull_str or bear_str
-    if not na(fib_hi_val) and not na(fib_lo_val)
-        box.delete(fib_box)
-        fib_box := box.new(bar_index - 50, fib_hi_val, bar_index + 30,
-             fib_lo_val, border_color=color.orange, bgcolor=i_col_zone, border_width=1)
+// ── Zona Fibonacci ─────────────────────────────────────────────
+// Naranja = COMPRAS x DESCUENTO | Amarillo = VENTAS x DESCUENTO
+// 3 pasos independientes:
+//   1. Borrar inmediatamente al flip de dirección
+//   2. Dibujar cuando la nueva dirección tiene valores válidos
+//   3. Extender borde derecho cada barra
+
+fib_active = g_fib_is_bull or g_fib_is_bear
+fib_bg     = g_fib_is_bull ? color.new(color.orange, 80) : color.new(color.yellow, 80)
+fib_border = g_fib_is_bull ? color.orange                : color.yellow
+fib_tc     = g_fib_is_bull ? color.orange                : color.yellow
+
+var box   fib_box      = na
+var label lbl_50       = na
+var label lbl_618      = na
+var label lbl_bias     = na
+var int   fib_dir_prev = 0
+
+curr_fib_dir = g_fib_is_bull ? 1 : g_fib_is_bear ? -1 : 0
+fib_flipped  = curr_fib_dir != fib_dir_prev
+
+// PASO 1: Borrar sin condición al detectar flip
+if fib_flipped
+    box.delete(fib_box)
+    fib_box      := na
+    fib_dir_prev := curr_fib_dir
+    if not na(lbl_50)
+        label.delete(lbl_50)
+        lbl_50 := na
+    if not na(lbl_618)
+        label.delete(lbl_618)
+        lbl_618 := na
+    if not na(lbl_bias)
+        label.delete(lbl_bias)
+        lbl_bias := na
+
+// PASO 2: Dibujar cuando hay dirección activa, valores válidos y no hay box
+new_fib_piv = (g_fib_is_bull and not na(ph)) or (g_fib_is_bear and not na(pl))
+should_draw = fib_active and not na(fib_hi_val) and not na(fib_lo_val) and
+              (na(fib_box) or new_fib_piv)
+
+if should_draw
+    fib_left = g_fib_is_bull ? fib_anchor_lo_bar : fib_anchor_hi_bar
+
+    box.delete(fib_box)
+    fib_box := box.new(fib_left, fib_hi_val, bar_index + 20,
+         fib_lo_val, border_color=fib_border, bgcolor=fib_bg, border_width=1)
+
+    // Etiquetas: BULL → top=50% bot=61.8% | BEAR → top=61.8% bot=50%
+    lbl_top = g_fib_is_bull ? "50%  "   + str.tostring(fib_hi_val, format.mintick)
+                             : "61.8%  " + str.tostring(fib_hi_val, format.mintick)
+    lbl_bot = g_fib_is_bull ? "61.8%  " + str.tostring(fib_lo_val, format.mintick)
+                             : "50%  "   + str.tostring(fib_lo_val, format.mintick)
+
+    label.delete(lbl_50)
+    lbl_50 := label.new(bar_index + 20, fib_hi_val, lbl_top,
+         style=label.style_label_left, color=color.new(color.black, 100),
+         textcolor=fib_tc, size=size.small)
+
+    label.delete(lbl_618)
+    lbl_618 := label.new(bar_index + 20, fib_lo_val, lbl_bot,
+         style=label.style_label_left, color=color.new(color.black, 100),
+         textcolor=fib_tc, size=size.small)
+
+    bias_txt = g_fib_is_bull ? "▲ COMPRAS x DESCUENTO" : "▼ VENTAS x DESCUENTO"
+    bias_x   = g_fib_is_bull ? fib_anchor_hi_bar : fib_anchor_lo_bar
+    label.delete(lbl_bias)
+    lbl_bias := label.new(bias_x, fib_hi_val, bias_txt,
+         style=label.style_label_right, color=color.new(color.black, 100),
+         textcolor=fib_tc, size=size.small)
+
+// PASO 3: Extender borde derecho cada barra
+if not na(fib_box) and fib_active and not na(fib_hi_val) and not na(fib_lo_val)
+    box.set_right       (fib_box, bar_index + 20)
+    box.set_top         (fib_box, fib_hi_val)
+    box.set_bottom      (fib_box, fib_lo_val)
+    box.set_bgcolor     (fib_box, fib_bg)
+    box.set_border_color(fib_box, fib_border)
+    if not na(lbl_50)
+        label.set_x        (lbl_50,  bar_index + 20)
+        label.set_y        (lbl_50,  fib_hi_val)
+        label.set_textcolor(lbl_50,  fib_tc)
+    if not na(lbl_618)
+        label.set_x        (lbl_618, bar_index + 20)
+        label.set_y        (lbl_618, fib_lo_val)
+        label.set_textcolor(lbl_618, fib_tc)
 
 // Order Block
 var box ob_box = na
@@ -562,8 +702,17 @@ draw_entry_panel(is_long, e, sl, tp1, tp2, conf_str) =>
     label.new(bar_index, lbl_y, lbl_txt,
          style=lbl_style, color=lbl_col, textcolor=color.white, size=size.small)
 
-// Ejecutar panel al dispararse una señal
-if i_show_panel
+// ── Panel de entrada: activo solo cuando todas las variables tienen valor
+// Guards verificados variable por variable:
+//   atr       — siempre disponible (ta.atr retorna na solo en las primeras 14 barras)
+//   last_pl   — g_last_pl, disponible tras el primer pivot low confirmado
+//   last_ph   — g_last_ph, disponible tras el primer pivot high confirmado
+//   sl_long/short  — dependen de last_pl/ph + atr (safe si los anteriores son válidos)
+//   tp1/tp2        — dependen de close + riesgo calculado (siempre numérico si sl es válido)
+//   conf_str  — siempre es string (puede ser vacío, nunca na)
+panel_vars_ok = not na(atr) and not na(last_pl) and not na(last_ph) and   not na(sl_long) and not na(sl_short) and  not na(tp1_long) and not na(tp2_long) and   not na(tp1_short) and not na(tp2_short)
+
+if i_show_panel and panel_vars_ok
     conf_str = f_conf_label(ob_score, fvg_score, piv_score, ema_score)
     if entry_long
         draw_entry_panel(true,  close, sl_long,  tp1_long,  tp2_long,  conf_str)
@@ -578,7 +727,7 @@ var table tbl = table.new(position.top_right, 2, 9,
 
 if barstate.islast
     // Fila 0 — Encabezado
-    table.cell(tbl, 0, 0, "FSZ v5 – Estado Actual",
+    table.cell(tbl, 0, 0, "FSZ v15 – Estado Actual",
          text_color=color.yellow, text_size=size.small,
          bgcolor=color.new(color.gray, 80))
     table.cell(tbl, 1, 0, "Estatus",
@@ -632,4 +781,4 @@ if barstate.islast
     table.cell(tbl, 1, 8, prob_txt,         text_color=prob_col,     text_size=size.small,
          bgcolor=color.new(prob_col, 80))
 
-// ── FIN v5.0 ───────────────────────────────────────────────────
+// ── FIN v15.0 ───────────────────────────────────────────────────
