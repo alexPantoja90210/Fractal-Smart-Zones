@@ -386,12 +386,15 @@ atr = ta.atr(14)
 // ═══════════════════════════════════════════════════════════════
 
 // Zona Fibonacci
+// Color naranja (bull_str = compra) | amarillo (bear_str = venta)
+fib_bg     = bull_str ? color.new(color.orange, 80) : color.new(color.yellow, 80)
+fib_border = bull_str ? color.orange : color.yellow
 var box fib_box = na
 if bull_str or bear_str
     if not na(fib_hi_val) and not na(fib_lo_val)
         box.delete(fib_box)
         fib_box := box.new(bar_index - 50, fib_hi_val, bar_index + 30,
-             fib_lo_val, border_color=color.orange, bgcolor=i_col_zone, border_width=1)
+             fib_lo_val, border_color=fib_border, bgcolor=fib_bg, border_width=1)
 
 // Order Block
 var box ob_box = na
