@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 // ║   Fractal Smart Zonez — by Alex Pantoja                     ║
-// ║   Pine Script v5  |  Versión 3.0 — Refactorizado           ║
+// ║   Pine Script v5  |  Versión 5.0 — Probabilidad de éxito   ║
 // ╠══════════════════════════════════════════════════════════════╣
 // ║  ESTRUCTURA DEL SCRIPT                                       ║
 // ║  ① INPUTS          — Parámetros configurables               ║
@@ -18,6 +18,7 @@
 // ║     f_conf_label()    Texto de confluencias activas          ║
 // ║     f_price()         Formatea precio al mintick             ║
 // ║     f_pips()          Distancia en puntos entre precios      ║
+// ║     f_probability()   Score 0–100% de probabilidad de éxito  ║
 // ║  ④ EJECUCIÓN       — Llama funciones y guarda resultados    ║
 // ║  ⑤ DIBUJO ZONAS    — Fib box, OB box, FVG box              ║
 // ║  ⑥ SEÑALES         — Shapes BUY / SELL / CHoCH / Pivots    ║
@@ -26,7 +27,7 @@
 // ╚══════════════════════════════════════════════════════════════╝
 
 //@version=5
-indicator("Fractal Smart Zonez – Alex Pantoja", shorttitle="FSZ·AP",
+indicator("Fractal Smart Zonez – Alex Pantoja", shorttitle="FSZ·AP v5",
      overlay=true, max_lines_count=300, max_boxes_count=150,
      max_labels_count=200)
 
@@ -88,42 +89,28 @@ f_structure(pivot_len) =>
     ph = ta.pivothigh(high, pivot_len, pivot_len)
     pl = ta.pivotlow (low,  pivot_len, pivot_len)
 
-    var float last_ph      = na
-    var float prev_ph      = na
-    var int   last_ph_bar  = na   // bar_index real donde ocurrió el pivot high
-    var float last_ph_bar_high = na  // precio high de la vela OB bajista (vela previa al PH)
-    var float last_ph_bar_low  = na  // precio low  de la vela OB bajista
-    var float last_pl      = na
-    var float prev_pl      = na
-    var int   last_pl_bar  = na   // bar_index real donde ocurrió el pivot low
-    var float last_pl_bar_high = na  // precio high de la vela OB alcista (vela previa al PL)
-    var float last_pl_bar_low  = na  // precio low  de la vela OB alcista
+    var float last_ph     = na
+    var float prev_ph     = na
+    var int   last_ph_bar = na
+    var float last_pl     = na
+    var float prev_pl     = na
+    var int   last_pl_bar = na
 
     if not na(ph)
-        prev_ph          := last_ph
-        last_ph          := ph
-        last_ph_bar      := bar_index - pivot_len
-        // OB bajista: vela justo antes del swing high (pivot_len + 1 barras atrás)
-        last_ph_bar_high := high[pivot_len + 1]
-        last_ph_bar_low  := low [pivot_len + 1]
+        prev_ph     := last_ph
+        last_ph     := ph
+        last_ph_bar := bar_index - pivot_len
 
     if not na(pl)
-        prev_pl          := last_pl
-        last_pl          := pl
-        last_pl_bar      := bar_index - pivot_len
-        // OB alcista: vela justo antes del swing low (pivot_len + 1 barras atrás)
-        last_pl_bar_high := high[pivot_len + 1]
-        last_pl_bar_low  := low [pivot_len + 1]
+        prev_pl     := last_pl
+        last_pl     := pl
+        last_pl_bar := bar_index - pivot_len
 
-    has_pivots = not na(last_ph) and not na(prev_ph) and not na(last_pl) and not na(prev_pl)
-    bull_str   = has_pivots and last_ph > prev_ph and last_pl > prev_pl
-    bear_str   = has_pivots and last_ph < prev_ph and last_pl < prev_pl
+    has_pivots    = not na(last_ph) and not na(prev_ph) and not na(last_pl) and not na(prev_pl)
+    bull_str      = has_pivots and last_ph > prev_ph and last_pl > prev_pl
+    bear_str      = has_pivots and last_ph < prev_ph and last_pl < prev_pl
 
-    [ph, pl, last_ph, prev_ph, last_ph_bar,
-     last_ph_bar_high, last_ph_bar_low,
-     last_pl, prev_pl, last_pl_bar,
-     last_pl_bar_high, last_pl_bar_low,
-     bull_str, bear_str]
+    [ph, pl, last_ph, prev_ph, last_ph_bar, last_pl, prev_pl, last_pl_bar, bull_str, bear_str]
 
 // ───────────────────────────────────────────────────────────────
 // f_fib_zone(last_ph, last_pl, bull_str, bear_str, fib_lo, fib_hi)
@@ -157,22 +144,23 @@ f_fib_zone(last_ph, last_pl, bull_str, bear_str, fib_lo, fib_hi) =>
 //   Retorna: [in_ob_bull, in_ob_bear, ob_hi, ob_lo, score]
 //     score = 1 si hay confluencia, 0 si no
 // ───────────────────────────────────────────────────────────────
-f_ob_conf(enabled, bull_str, bear_str,
-          pl_ob_hi, pl_ob_lo, ph_ob_hi, ph_ob_lo,
-          fib_lo_val, fib_hi_val) =>
-    // Los precios del OB se capturan en f_structure en el momento exacto
-    // del pivot, evitando lookbacks con bar_index que fallan en TF altos.
-    in_bull = enabled and bull_str and not na(pl_ob_hi) and
-              close >= fib_lo_val and close <= fib_hi_val and
-              close >= pl_ob_lo   and close <= pl_ob_hi
+f_ob_conf(enabled, bull_str, bear_str, last_pl_bar, last_ph_bar, fib_lo_val, fib_hi_val) =>
+    ob_bull_hi = na(last_pl_bar) ? na : high[bar_index - last_pl_bar + 1]
+    ob_bull_lo = na(last_pl_bar) ? na : low [bar_index - last_pl_bar + 1]
+    ob_bear_hi = na(last_ph_bar) ? na : high[bar_index - last_ph_bar + 1]
+    ob_bear_lo = na(last_ph_bar) ? na : low [bar_index - last_ph_bar + 1]
 
-    in_bear = enabled and bear_str and not na(ph_ob_hi) and
+    in_bull = enabled and bull_str and not na(ob_bull_hi) and
               close >= fib_lo_val and close <= fib_hi_val and
-              close >= ph_ob_lo   and close <= ph_ob_hi
+              close >= ob_bull_lo and close <= ob_bull_hi
 
-    ob_hi = in_bull ? pl_ob_hi : in_bear ? ph_ob_hi : na
-    ob_lo = in_bull ? pl_ob_lo : in_bear ? ph_ob_lo : na
-    score = (in_bull or in_bear) ? 1 : 0
+    in_bear = enabled and bear_str and not na(ob_bear_hi) and
+              close >= fib_lo_val and close <= fib_hi_val and
+              close >= ob_bear_lo and close <= ob_bear_hi
+
+    ob_hi   = in_bull ? ob_bull_hi : in_bear ? ob_bear_hi : na
+    ob_lo   = in_bull ? ob_bull_lo : in_bear ? ob_bear_lo : na
+    score   = (in_bull or in_bear) ? 1 : 0
 
     [in_bull, in_bear, ob_hi, ob_lo, score]
 
@@ -350,6 +338,84 @@ f_price(p) =>
 f_pips(entry, nivel) =>
     math.round(math.abs(nivel - entry) / syminfo.mintick)
 
+
+// ───────────────────────────────────────────────────────────────
+// f_probability(bull_str, bear_str, price_in_zone,
+//               ob_score, fvg_score, piv_score, ema_score,
+//               choch_bull, choch_bear, rej_bull, rej_bear,
+//               fib_hi_val, fib_lo_val, total_conf)
+//
+//   Calcula un score de probabilidad de éxito (0–100%) basado
+//   en la alineación de todos los factores de la estrategia.
+//
+//   TABLA DE PESOS (suma máxima = 100 pts):
+//   ┌─────────────────────────────────────┬───────┐
+//   │ Factor                              │ Peso  │
+//   ├─────────────────────────────────────┼───────┤
+//   │ Estructura activa (bull/bear)        │  20   │
+//   │ Precio dentro de zona Fib 50-61.8%  │  15   │
+//   │ Posición en zona (más cerca 61.8%)  │   5   │
+//   │ CHoCH confirmado (dir. correcta)    │  20   │
+//   │ Vela de rechazo (dir. correcta)     │  15   │
+//   │ Confluencias (5 pts c/u, máx 4)    │  20   │
+//   │ Alineación EMAs 21 > 50 / 21 < 50   │   5   │
+//   └─────────────────────────────────────┴───────┘
+//
+//   Retorna: float 0.0–100.0
+// ───────────────────────────────────────────────────────────────
+f_probability(bull_str, bear_str, price_in_zone,
+              ob_score, fvg_score, piv_score, ema_score,
+              choch_bull, choch_bear, rej_bull, rej_bear,
+              fib_hi_val, fib_lo_val, total_conf,
+              ema21, ema50) =>
+    score = 0.0
+
+    // ── Bloque 1: Estructura (20 pts)
+    // Estructura alcista o bajista definida = base del trade
+    if bull_str or bear_str
+        score += 20.0
+
+    // ── Bloque 2: Precio en zona Fibonacci (15 pts)
+    if price_in_zone
+        score += 15.0
+
+        // ── Bloque 3: Posición dentro de la zona (5 pts)
+        // Cuanto más cerca del 61.8% (zona más fuerte), mayor peso.
+        // Se calcula como la proporción de cercanía al extremo fuerte de la zona.
+        zone_range = fib_hi_val - fib_lo_val
+        if zone_range > 0
+            // Alcista: el 61.8% es fib_lo_val (extremo inferior = más retroceso = más fuerte)
+            // Bajista: el 61.8% es fib_hi_val (extremo superior = más retroceso = más fuerte)
+            dist_to_strong = bull_str ? (close - fib_lo_val) / zone_range
+                           : bear_str ? (fib_hi_val - close) / zone_range : 0.0
+            // dist_to_strong → 0.0 = lejos del 61.8%, 1.0 = encima del 61.8%
+            // Invertimos: más cerca del 61.8% = más puntos
+            proximity = 1.0 - math.max(0.0, math.min(1.0, dist_to_strong))
+            score += proximity * 5.0
+
+    // ── Bloque 4: CHoCH en dirección correcta (20 pts)
+    // CHoCH bear dentro de bull_str = señal long válida
+    // CHoCH bull dentro de bear_str = señal short válida
+    choch_aligned = (bull_str and choch_bear) or (bear_str and choch_bull)
+    if choch_aligned
+        score += 20.0
+
+    // ── Bloque 5: Vela de rechazo alineada (15 pts)
+    rej_aligned = (bull_str and rej_bull) or (bear_str and rej_bear)
+    if rej_aligned
+        score += 15.0
+
+    // ── Bloque 6: Confluencias en zona (5 pts cada una, máx 20 pts)
+    score += math.min(float(total_conf) * 5.0, 20.0)
+
+    // ── Bloque 7: Alineación EMAs (5 pts)
+    // EMAs deben confirmar la estructura: 21 > 50 en alcista, 21 < 50 en bajista
+    ema_aligned = (bull_str and ema21 > ema50) or (bear_str and ema21 < ema50)
+    if ema_aligned
+        score += 5.0
+
+    math.round(score)
+
 // ═══════════════════════════════════════════════════════════════
 // ④ EJECUCIÓN — Llama funciones y almacena resultados
 // ═══════════════════════════════════════════════════════════════
@@ -357,9 +423,7 @@ f_pips(entry, nivel) =>
 // — Estructura & fractales
 [ph, pl,
  last_ph, _prev_ph, last_ph_bar,
- last_ph_ob_hi, last_ph_ob_lo,
  last_pl, _prev_pl, last_pl_bar,
- last_pl_ob_hi, last_pl_ob_lo,
  bull_str, bear_str] = f_structure(i_pivot_len)
 
 // — Zona Fibonacci
@@ -369,7 +433,7 @@ f_pips(entry, nivel) =>
 price_in_zone = not na(fib_hi_val) and not na(fib_lo_val) and                close >= fib_lo_val and close <= fib_hi_val
 
 // — Confluencias
-[in_ob_bull, in_ob_bear, ob_hi, ob_lo, ob_score]      = f_ob_conf   (i_use_ob,    bull_str, bear_str, last_pl_ob_hi, last_pl_ob_lo, last_ph_ob_hi, last_ph_ob_lo, fib_lo_val, fib_hi_val)
+[in_ob_bull, in_ob_bear, ob_hi, ob_lo, ob_score]      = f_ob_conf   (i_use_ob,    bull_str, bear_str, last_pl_bar, last_ph_bar, fib_lo_val, fib_hi_val)
 [in_fvg_bull, in_fvg_bear, fvg_hi, fvg_lo, fvg_score] = f_fvg_conf  (i_use_fvg,   bull_str, bear_str, fib_lo_val, fib_hi_val)
 piv_score                                               = f_pivot_conf(i_use_pivot, fib_lo_val, fib_hi_val)
 [ema21, ema50, ema_score]                               = f_trend_conf(i_use_trend, bull_str, bear_str, fib_lo_val, fib_hi_val)
@@ -387,6 +451,13 @@ zone_valid = total_conf >= i_min_conf
 entry_long  = i_show_entry and bull_str and price_in_zone and zone_valid and choch_bear and rej_bull
 entry_short = i_show_entry and bear_str and price_in_zone and zone_valid and choch_bull and rej_bear
 
+// — Probabilidad de éxito del trade (0–100%)
+prob_score = f_probability(bull_str, bear_str, price_in_zone,
+             ob_score, fvg_score, piv_score, ema_score,
+             choch_bull, choch_bear, rej_bull, rej_bear,
+             fib_hi_val, fib_lo_val, total_conf,
+             ema21, ema50)
+
 // — Niveles de riesgo
 atr = ta.atr(14)
 [sl_long, tp1_long, tp2_long,
@@ -397,22 +468,12 @@ atr = ta.atr(14)
 // ═══════════════════════════════════════════════════════════════
 
 // Zona Fibonacci
-// Color naranja (bull_str = compra) | amarillo (bear_str = venta)
-// Se redibuja SOLO cuando aparece un nuevo pivot (ph o pl), no en cada barra.
-// Esto garantiza que los límites del box correspondan al fractal real,
-// sin desplazarse con bar_index en TF altos como D y 4H.
-fib_bg     = bull_str ? color.new(color.orange, 80) : color.new(color.yellow, 80)
-fib_border = bull_str ? color.orange : color.yellow
 var box fib_box = na
-new_pivot  = not na(ph) or not na(pl)   // solo true en la barra donde se confirma un pivot
-if new_pivot and (bull_str or bear_str)
+if bull_str or bear_str
     if not na(fib_hi_val) and not na(fib_lo_val)
         box.delete(fib_box)
-        // left = bar donde ocurrió el último swing relevante
-        // right = proyección fija de 50 barras hacia adelante
-        fib_left  = bull_str ? last_pl_bar : last_ph_bar
-        fib_box  := box.new(fib_left, fib_hi_val, bar_index + 50,
-             fib_lo_val, border_color=fib_border, bgcolor=fib_bg, border_width=1)
+        fib_box := box.new(bar_index - 50, fib_hi_val, bar_index + 30,
+             fib_lo_val, border_color=color.orange, bgcolor=i_col_zone, border_width=1)
 
 // Order Block
 var box ob_box = na
@@ -512,12 +573,12 @@ if i_show_panel
 // ═══════════════════════════════════════════════════════════════
 // ⑧ TABLA DE ESTADO — Dashboard top-right
 // ═══════════════════════════════════════════════════════════════
-var table tbl = table.new(position.top_right, 2, 8,
+var table tbl = table.new(position.top_right, 2, 9,
      bgcolor=color.new(color.black, 70), border_color=color.gray, border_width=1)
 
 if barstate.islast
     // Fila 0 — Encabezado
-    table.cell(tbl, 0, 0, "FSZ v3 – Estado Actual",
+    table.cell(tbl, 0, 0, "FSZ v5 – Estado Actual",
          text_color=color.yellow, text_size=size.small,
          bgcolor=color.new(color.gray, 80))
     table.cell(tbl, 1, 0, "Estatus",
@@ -564,4 +625,11 @@ if barstate.islast
     table.cell(tbl, 0, 7, "Señal",   text_color=color.white, text_size=size.small)
     table.cell(tbl, 1, 7, sig_txt,   text_color=sig_col,     text_size=size.small)
 
-// ── FIN v3.0 ───────────────────────────────────────────────────
+    // Fila 8 — Probabilidad de éxito
+    prob_col = prob_score >= 70 ? color.green : color.red
+    prob_txt = str.tostring(prob_score) + "%"
+    table.cell(tbl, 0, 8, "Probabilidad",  text_color=color.white,  text_size=size.small)
+    table.cell(tbl, 1, 8, prob_txt,         text_color=prob_col,     text_size=size.small,
+         bgcolor=color.new(prob_col, 80))
+
+// ── FIN v5.0 ───────────────────────────────────────────────────
