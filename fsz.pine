@@ -1,0 +1,546 @@
+// ╔══════════════════════════════════════════════════════════════╗
+// ║   Fractal Smart Zonez — by Alex Pantoja                     ║
+// ║   Pine Script v5  |  Versión 3.0 — Refactorizado           ║
+// ╠══════════════════════════════════════════════════════════════╣
+// ║  ESTRUCTURA DEL SCRIPT                                       ║
+// ║  ① INPUTS          — Parámetros configurables               ║
+// ║  ② CONSTANTES      — Paleta de colores del panel            ║
+// ║  ③ FUNCIONES       — Lógica encapsulada y reutilizable      ║
+// ║     f_structure()     Detecta fractales y estructura         ║
+// ║     f_fib_zone()      Calcula zona dorada Fibonacci          ║
+// ║     f_ob_conf()       Confluencia Order Block                ║
+// ║     f_fvg_conf()      Confluencia Fair Value Gap             ║
+// ║     f_pivot_conf()    Confluencia Zona Pivot                 ║
+// ║     f_trend_conf()    Confluencia Directriz EMA              ║
+// ║     f_choch()         Detecta Change of Character           ║
+// ║     f_rejection()     Detecta vela de rechazo               ║
+// ║     f_risk_levels()   Calcula SL / TP1 / TP2               ║
+// ║     f_conf_label()    Texto de confluencias activas          ║
+// ║     f_price()         Formatea precio al mintick             ║
+// ║     f_pips()          Distancia en puntos entre precios      ║
+// ║  ④ EJECUCIÓN       — Llama funciones y guarda resultados    ║
+// ║  ⑤ DIBUJO ZONAS    — Fib box, OB box, FVG box              ║
+// ║  ⑥ SEÑALES         — Shapes BUY / SELL / CHoCH / Pivots    ║
+// ║  ⑦ PANEL ENTRADA   — Líneas, boxes y labels de trade        ║
+// ║  ⑧ TABLA ESTADO    — Dashboard top-right                    ║
+// ╚══════════════════════════════════════════════════════════════╝
+
+//@version=5
+indicator("Fractal Smart Zonez – Alex Pantoja", shorttitle="FSZ·AP",
+     overlay=true, max_lines_count=300, max_boxes_count=150,
+     max_labels_count=200)
+
+// ═══════════════════════════════════════════════════════════════
+// ① INPUTS
+// ═══════════════════════════════════════════════════════════════
+grp1 = "── Fractales & Fibonacci"
+i_pivot_len  = input.int  (5,     "Longitud pivot (fractal)",        minval=2,  maxval=20,  group=grp1)
+i_fib_lo     = input.float(0.50,  "Fib inferior (zona dorada)",      step=0.01, group=grp1)
+i_fib_hi     = input.float(0.618, "Fib superior (zona dorada)",      step=0.01, group=grp1)
+
+grp2 = "── Confluencias"
+i_use_ob     = input.bool (true,  "Order Block (OB)",                group=grp2)
+i_use_fvg    = input.bool (true,  "Fair Value Gap (FVG)",            group=grp2)
+i_use_pivot  = input.bool (true,  "Zona Pivot clásica",              group=grp2)
+i_use_trend  = input.bool (true,  "Directriz (EMA 21/50)",           group=grp2)
+i_min_conf   = input.int  (2,     "Confluencias mínimas requeridas", minval=1,  maxval=4,   group=grp2)
+
+grp3 = "── CHoCH & Entrada"
+i_choch_len  = input.int  (3,     "Sensibilidad CHoCH",              minval=2,  maxval=10,  group=grp3)
+i_show_entry = input.bool (true,  "Mostrar señal de entrada",        group=grp3)
+i_show_panel = input.bool (true,  "Mostrar panel SL / TP1 / TP2",   group=grp3)
+i_rr1        = input.float(2.0,   "RR TP1  (mover BE al 1:1)",      step=0.5,  group=grp3)
+i_rr2        = input.float(4.0,   "RR TP2",                         step=0.5,  group=grp3)
+i_panel_bars = input.int  (40,    "Ancho del panel visual (barras)", minval=10, maxval=100, group=grp3)
+
+grp4 = "── Visual"
+i_col_zone   = input.color(color.new(color.orange, 80), "Color Zona Fibo",      group=grp4)
+i_col_ob     = input.color(color.new(color.blue,   85), "Color OB",             group=grp4)
+i_col_fvg    = input.color(color.new(color.purple, 85), "Color FVG",            group=grp4)
+i_col_bull   = input.color(color.new(color.teal,    0), "Color Señal Alcista",  group=grp4)
+i_col_bear   = input.color(color.new(color.red,     0), "Color Señal Bajista",  group=grp4)
+
+// ═══════════════════════════════════════════════════════════════
+// ② CONSTANTES — Paleta fija del panel de entrada
+// ═══════════════════════════════════════════════════════════════
+C_ENTRY = color.white
+C_SL    = color.new(#FF3B30, 0)
+C_TP1   = color.new(#34C759, 0)
+C_TP2   = color.new(#00C7BE, 0)
+C_RISK  = color.new(#FF3B30, 88)
+C_BOX1  = color.new(#34C759, 88)
+C_BOX2  = color.new(#00C7BE, 88)
+
+// ═══════════════════════════════════════════════════════════════
+// ③ FUNCIONES
+// ═══════════════════════════════════════════════════════════════
+
+// ───────────────────────────────────────────────────────────────
+// f_structure(pivot_len)
+//   Detecta los últimos dos swing highs y swing lows.
+//   Retorna: [last_ph, prev_ph, last_ph_bar, last_pl, prev_pl, last_pl_bar,
+//             bull_structure, bear_structure]
+//
+//   bull_structure = HH + HL  →  tendencia alcista
+//   bear_structure = LH + LL  →  tendencia bajista
+// ───────────────────────────────────────────────────────────────
+f_structure(pivot_len) =>
+    ph = ta.pivothigh(high, pivot_len, pivot_len)
+    pl = ta.pivotlow (low,  pivot_len, pivot_len)
+
+    var float last_ph     = na
+    var float prev_ph     = na
+    var int   last_ph_bar = na
+    var float last_pl     = na
+    var float prev_pl     = na
+    var int   last_pl_bar = na
+
+    if not na(ph)
+        prev_ph     := last_ph
+        last_ph     := ph
+        last_ph_bar := bar_index - pivot_len
+
+    if not na(pl)
+        prev_pl     := last_pl
+        last_pl     := pl
+        last_pl_bar := bar_index - pivot_len
+
+    has_pivots    = not na(last_ph) and not na(prev_ph) and not na(last_pl) and not na(prev_pl)
+    bull_str      = has_pivots and last_ph > prev_ph and last_pl > prev_pl
+    bear_str      = has_pivots and last_ph < prev_ph and last_pl < prev_pl
+
+    [ph, pl, last_ph, prev_ph, last_ph_bar, last_pl, prev_pl, last_pl_bar, bull_str, bear_str]
+
+// ───────────────────────────────────────────────────────────────
+// f_fib_zone(last_ph, last_pl, bull_str, bear_str, fib_lo, fib_hi)
+//   Calcula los límites superior e inferior de la zona dorada
+//   (retroceso 50%–61.8%) sobre el último fractal activo.
+//   Retorna: [fib_hi_val, fib_lo_val]
+// ───────────────────────────────────────────────────────────────
+f_fib_zone(last_ph, last_pl, bull_str, bear_str, fib_lo, fib_hi) =>
+    rango = last_ph - last_pl
+
+    // Alcista: precio retrocede desde PH hacia abajo
+    zone_hi_bull = last_ph - rango * fib_lo
+    zone_lo_bull = last_ph - rango * fib_hi
+
+    // Bajista: precio retrocede desde PL hacia arriba
+    zone_hi_bear = last_pl + rango * fib_hi
+    zone_lo_bear = last_pl + rango * fib_lo
+
+    fib_hi_val = bull_str ? zone_hi_bull : bear_str ? zone_hi_bear : na
+    fib_lo_val = bull_str ? zone_lo_bull : bear_str ? zone_lo_bear : na
+
+    [fib_hi_val, fib_lo_val]
+
+// ───────────────────────────────────────────────────────────────
+// f_ob_conf(enabled, bull_str, bear_str, last_pl_bar, last_ph_bar,
+//           fib_lo_val, fib_hi_val)
+//   Detecta si la vela actual está dentro de un Order Block
+//   que además cae dentro de la zona Fibonacci.
+//   OB alcista = vela justo antes del swing low (antes del impulso)
+//   OB bajista = vela justo antes del swing high
+//   Retorna: [in_ob_bull, in_ob_bear, ob_hi, ob_lo, score]
+//     score = 1 si hay confluencia, 0 si no
+// ───────────────────────────────────────────────────────────────
+f_ob_conf(enabled, bull_str, bear_str, last_pl_bar, last_ph_bar, fib_lo_val, fib_hi_val) =>
+    ob_bull_hi = na(last_pl_bar) ? na : high[bar_index - last_pl_bar + 1]
+    ob_bull_lo = na(last_pl_bar) ? na : low [bar_index - last_pl_bar + 1]
+    ob_bear_hi = na(last_ph_bar) ? na : high[bar_index - last_ph_bar + 1]
+    ob_bear_lo = na(last_ph_bar) ? na : low [bar_index - last_ph_bar + 1]
+
+    in_bull = enabled and bull_str and not na(ob_bull_hi) and
+              close >= fib_lo_val and close <= fib_hi_val and
+              close >= ob_bull_lo and close <= ob_bull_hi
+
+    in_bear = enabled and bear_str and not na(ob_bear_hi) and
+              close >= fib_lo_val and close <= fib_hi_val and
+              close >= ob_bear_lo and close <= ob_bear_hi
+
+    ob_hi   = in_bull ? ob_bull_hi : in_bear ? ob_bear_hi : na
+    ob_lo   = in_bull ? ob_bull_lo : in_bear ? ob_bear_lo : na
+    score   = (in_bull or in_bear) ? 1 : 0
+
+    [in_bull, in_bear, ob_hi, ob_lo, score]
+
+// ───────────────────────────────────────────────────────────────
+// f_fvg_conf(enabled, bull_str, bear_str, fib_lo_val, fib_hi_val)
+//   Detecta un Fair Value Gap (imbalance de 3 velas) en la zona.
+//   FVG alcista : high[2] < low[0]  (gap hacia arriba)
+//   FVG bajista : low[2]  > high[0] (gap hacia abajo)
+//   Retorna: [in_fvg_bull, in_fvg_bear, fvg_hi, fvg_lo, score]
+// ───────────────────────────────────────────────────────────────
+f_fvg_conf(enabled, bull_str, bear_str, fib_lo_val, fib_hi_val) =>
+    is_bull = high[2] < low[0]
+    is_bear = low[2]  > high[0]
+
+    fvg_bull_hi = low[0]
+    fvg_bull_lo = high[2]
+    fvg_bear_hi = low[2]
+    fvg_bear_lo = high[0]
+
+    in_bull = enabled and bull_str and is_bull and
+              fvg_bull_lo <= fib_hi_val and fvg_bull_hi >= fib_lo_val
+    in_bear = enabled and bear_str and is_bear and
+              fvg_bear_lo <= fib_hi_val and fvg_bear_hi >= fib_lo_val
+
+    fvg_hi  = in_bull ? fvg_bull_hi : in_bear ? fvg_bear_hi : na
+    fvg_lo  = in_bull ? fvg_bull_lo : in_bear ? fvg_bear_lo : na
+    score   = (in_bull or in_bear) ? 1 : 0
+
+    [in_bull, in_bear, fvg_hi, fvg_lo, score]
+
+// ───────────────────────────────────────────────────────────────
+// f_pivot_conf(enabled, fib_lo_val, fib_hi_val)
+//   Verifica si algún nivel pivot clásico (PP, R1 o S1)
+//   cae dentro de la zona Fibonacci activa.
+//   Retorna: score (1 = confluencia presente, 0 = ausente)
+// ───────────────────────────────────────────────────────────────
+f_pivot_conf(enabled, fib_lo_val, fib_hi_val) =>
+    pp = (high[1] + low[1] + close[1]) / 3
+    r1 = 2 * pp - low[1]
+    s1 = 2 * pp - high[1]
+
+    // Pine v5 no soporta funciones anidadas con parametros propios,
+    // se expande la comparacion directamente para cada nivel.
+    pp_in = pp >= fib_lo_val and pp <= fib_hi_val
+    r1_in = r1 >= fib_lo_val and r1 <= fib_hi_val
+    s1_in = s1 >= fib_lo_val and s1 <= fib_hi_val
+
+    hit   = enabled and not na(fib_hi_val) and not na(fib_lo_val) and (pp_in or r1_in or s1_in)
+    score = hit ? 1 : 0
+    score
+
+// ───────────────────────────────────────────────────────────────
+// f_trend_conf(enabled, bull_str, bear_str, fib_lo_val, fib_hi_val)
+//   Confirma directriz por EMAs 21 y 50.
+//   Válido si alguna EMA cae en la zona o si el precio está
+//   en la zona y las EMAs confirman la dirección de la estructura.
+//   Retorna: [ema21, ema50, score]
+// ───────────────────────────────────────────────────────────────
+f_trend_conf(enabled, bull_str, bear_str, fib_lo_val, fib_hi_val) =>
+    ema21 = ta.ema(close, 21)
+    ema50 = ta.ema(close, 50)
+
+    // Pine v5 no soporta funciones anidadas con parametros propios,
+    // se expande la comparacion directamente para cada valor.
+    ema21_in  = not na(fib_hi_val) and not na(fib_lo_val) and ema21 >= fib_lo_val and ema21 <= fib_hi_val
+    ema50_in  = not na(fib_hi_val) and not na(fib_lo_val) and ema50 >= fib_lo_val and ema50 <= fib_hi_val
+    price_in  = not na(fib_hi_val) and not na(fib_lo_val) and close >= fib_lo_val and close <= fib_hi_val
+
+    hit = enabled and
+          (ema21_in or
+           ema50_in or
+           (bull_str and ema21 > ema50 and price_in) or
+           (bear_str and ema21 < ema50 and price_in))
+
+    score = hit ? 1 : 0
+    [ema21, ema50, score]
+
+// ───────────────────────────────────────────────────────────────
+// f_choch(bull_str, bear_str, price_in_zone, choch_len)
+//   Detecta Change of Character (CHoCH): ruptura de pivot menor
+//   dentro de la zona de confluencia.
+//   CHoCH bear  = retroceso alcista pierde mínimo menor (→ entrada long)
+//   CHoCH bull  = rebote bajista supera máximo menor   (→ entrada short)
+//   Retorna: [choch_bull, choch_bear]
+// ───────────────────────────────────────────────────────────────
+f_choch(bull_str, bear_str, price_in_zone, choch_len) =>
+    ph_m = ta.pivothigh(high, choch_len, choch_len)
+    pl_m = ta.pivotlow (low,  choch_len, choch_len)
+
+    var float last_ph_m = na
+    var float last_pl_m = na
+
+    if not na(ph_m)
+        last_ph_m := ph_m
+    if not na(pl_m)
+        last_pl_m := pl_m
+
+    // Dentro de estructura bajista, precio en zona, y rompe máximo menor → CHoCH alcista
+    choch_bull = bear_str and price_in_zone and not na(last_ph_m) and high > last_ph_m
+    // Dentro de estructura alcista, precio en zona, y rompe mínimo menor → CHoCH bajista
+    choch_bear = bull_str and price_in_zone and not na(last_pl_m) and low  < last_pl_m
+
+    [choch_bull, choch_bear]
+
+// ───────────────────────────────────────────────────────────────
+// f_rejection()
+//   Evalúa si la vela actual es una vela de rechazo válida.
+//   Patrones reconocidos:
+//     Pin bar alcista  — mecha inferior > 2× cuerpo, cierre mitad superior
+//     Pin bar bajista  — mecha superior > 2× cuerpo, cierre mitad inferior
+//     Engulfing alcista — vela verde que envuelve la vela anterior
+//     Engulfing bajista — vela roja que envuelve la vela anterior
+//   Retorna: [rejection_bull, rejection_bear]
+// ───────────────────────────────────────────────────────────────
+f_rejection() =>
+    cuerpo      = math.abs(close - open)
+    mecha_sup   = high - math.max(close, open)
+    mecha_inf   = math.min(close, open) - low
+    mid         = (high + low) / 2
+
+    pin_bull     = mecha_inf > 2 * cuerpo and close > mid
+    pin_bear     = mecha_sup > 2 * cuerpo and close < mid
+    engulf_bull  = close > open and close > high[1] and open < low[1]
+    engulf_bear  = close < open and close < low[1]  and open > high[1]
+
+    rej_bull = pin_bull or engulf_bull
+    rej_bear = pin_bear or engulf_bear
+
+    [rej_bull, rej_bear]
+
+// ───────────────────────────────────────────────────────────────
+// f_risk_levels(entry, last_pl, last_ph, atr_val, rr1, rr2)
+//   Calcula SL bajo el fractal + colchón ATR,
+//   y proyecta TP1 y TP2 usando el RR configurado.
+//   Retorna (long): [sl_long, tp1_long, tp2_long]
+//   Retorna (short): [sl_short, tp1_short, tp2_short]
+// ───────────────────────────────────────────────────────────────
+f_risk_levels(entry, last_pl, last_ph, atr_val, rr1, rr2) =>
+    sl_long  = last_pl - atr_val * 0.3
+    sl_short = last_ph + atr_val * 0.3
+
+    risk_long  = entry - sl_long
+    risk_short = sl_short - entry
+
+    tp1_long   = entry + risk_long  * rr1
+    tp2_long   = entry + risk_long  * rr2
+    tp1_short  = entry - risk_short * rr1
+    tp2_short  = entry - risk_short * rr2
+
+    [sl_long, tp1_long, tp2_long, sl_short, tp1_short, tp2_short]
+
+// ───────────────────────────────────────────────────────────────
+// f_conf_label(ob, fvg, piv, ema)
+//   Construye el string con las confluencias activas
+//   para mostrar en labels y tabla.
+//   Retorna: string (ej. "OB FVG EMA")
+// ───────────────────────────────────────────────────────────────
+f_conf_label(ob, fvg, piv, ema) =>
+    (ob  > 0 ? "OB "    : "") +
+    (fvg > 0 ? "FVG "   : "") +
+    (piv > 0 ? "PIVOT " : "") +
+    (ema > 0 ? "EMA"    : "")
+
+// ───────────────────────────────────────────────────────────────
+// f_price(p)
+//   Formatea un precio usando el mintick del símbolo activo.
+//   Retorna: string con el precio formateado
+// ───────────────────────────────────────────────────────────────
+f_price(p) =>
+    str.tostring(p, format.mintick)
+
+// ───────────────────────────────────────────────────────────────
+// f_pips(entry, nivel)
+//   Calcula la distancia en puntos (ticks) entre dos precios.
+//   Útil para mostrar el tamaño del SL en las etiquetas.
+//   Retorna: int (número de ticks)
+// ───────────────────────────────────────────────────────────────
+f_pips(entry, nivel) =>
+    math.round(math.abs(nivel - entry) / syminfo.mintick)
+
+// ═══════════════════════════════════════════════════════════════
+// ④ EJECUCIÓN — Llama funciones y almacena resultados
+// ═══════════════════════════════════════════════════════════════
+
+// — Estructura & fractales
+[ph, pl,
+ last_ph, _prev_ph, last_ph_bar,
+ last_pl, _prev_pl, last_pl_bar,
+ bull_str, bear_str] = f_structure(i_pivot_len)
+
+// — Zona Fibonacci
+[fib_hi_val, fib_lo_val] = f_fib_zone(last_ph, last_pl, bull_str, bear_str, i_fib_lo, i_fib_hi)
+
+// — Precio en zona (condición base compartida por confluencias)
+price_in_zone = not na(fib_hi_val) and not na(fib_lo_val) and
+                close >= fib_lo_val and close <= fib_hi_val
+
+// — Confluencias
+[in_ob_bull, in_ob_bear, ob_hi, ob_lo, ob_score]      = f_ob_conf   (i_use_ob,    bull_str, bear_str, last_pl_bar, last_ph_bar, fib_lo_val, fib_hi_val)
+[in_fvg_bull, in_fvg_bear, fvg_hi, fvg_lo, fvg_score] = f_fvg_conf  (i_use_fvg,   bull_str, bear_str, fib_lo_val, fib_hi_val)
+piv_score                                               = f_pivot_conf(i_use_pivot, fib_lo_val, fib_hi_val)
+[ema21, ema50, ema_score]                               = f_trend_conf(i_use_trend, bull_str, bear_str, fib_lo_val, fib_hi_val)
+
+total_conf = ob_score + fvg_score + piv_score + ema_score
+zone_valid = total_conf >= i_min_conf
+
+// — CHoCH
+[choch_bull, choch_bear] = f_choch(bull_str, bear_str, price_in_zone, i_choch_len)
+
+// — Vela de rechazo
+[rej_bull, rej_bear] = f_rejection()
+
+// — Señal final de entrada
+entry_long  = i_show_entry and bull_str and price_in_zone and zone_valid and choch_bear and rej_bull
+entry_short = i_show_entry and bear_str and price_in_zone and zone_valid and choch_bull and rej_bear
+
+// — Niveles de riesgo
+atr = ta.atr(14)
+[sl_long, tp1_long, tp2_long,
+ sl_short, tp1_short, tp2_short] = f_risk_levels(close, last_pl, last_ph, atr, i_rr1, i_rr2)
+
+// ═══════════════════════════════════════════════════════════════
+// ⑤ DIBUJO DE ZONAS (Fib box, OB box, FVG box)
+// ═══════════════════════════════════════════════════════════════
+
+// Zona Fibonacci
+var box fib_box = na
+if bull_str or bear_str
+    if not na(fib_hi_val) and not na(fib_lo_val)
+        box.delete(fib_box)
+        fib_box := box.new(bar_index - 50, fib_hi_val, bar_index + 30,
+             fib_lo_val, border_color=color.orange, bgcolor=i_col_zone, border_width=1)
+
+// Order Block
+var box ob_box = na
+if in_ob_bull or in_ob_bear
+    box.delete(ob_box)
+    ob_box := box.new(bar_index - 3, ob_hi, bar_index, ob_lo,
+         bgcolor=i_col_ob, border_color=color.blue,
+         border_width=1, border_style=line.style_dotted)
+
+// Fair Value Gap
+var box fvg_box = na
+if in_fvg_bull or in_fvg_bear
+    box.delete(fvg_box)
+    fvg_box := box.new(bar_index - 2, fvg_hi, bar_index, fvg_lo,
+         bgcolor=i_col_fvg, border_color=color.purple,
+         border_width=1, border_style=line.style_dashed)
+
+// EMAs (directriz)
+plot(ema21, "EMA 21", color=color.new(color.yellow, 30), linewidth=1)
+plot(ema50, "EMA 50", color=color.new(color.orange, 30), linewidth=1)
+
+// ═══════════════════════════════════════════════════════════════
+// ⑥ SEÑALES — Shapes en el gráfico
+// ═══════════════════════════════════════════════════════════════
+plotshape(entry_long,  title="BUY",         style=shape.triangleup,   location=location.belowbar, color=i_col_bull,                   size=size.normal, text="BUY")
+plotshape(entry_short, title="SELL",        style=shape.triangledown, location=location.abovebar, color=i_col_bear,                   size=size.normal, text="SELL")
+plotshape(choch_bull,  title="CHoCH Bull",  style=shape.circle,       location=location.belowbar, color=color.new(color.teal, 40),    size=size.tiny)
+plotshape(choch_bear,  title="CHoCH Bear",  style=shape.circle,       location=location.abovebar, color=color.new(color.red,  40),    size=size.tiny)
+plotshape(not na(ph),  title="Swing High",  style=shape.labeldown,    location=location.abovebar, color=color.new(color.red,  60),    size=size.tiny)
+plotshape(not na(pl),  title="Swing Low",   style=shape.labelup,      location=location.belowbar, color=color.new(color.teal, 60),    size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════
+// ⑦ PANEL DE ENTRADA — Función interna de dibujo
+//    draw_entry_panel(is_long, entry, sl, tp1, tp2, conf_str)
+//    Dibuja boxes de riesgo/ganancia, líneas horizontales
+//    y etiquetas con precio + RR + confluencias.
+// ═══════════════════════════════════════════════════════════════
+draw_entry_panel(is_long, e, sl, tp1, tp2, conf_str) =>
+    right = bar_index + i_panel_bars
+
+    // Límites de los boxes según dirección
+    risk_top  = is_long ? e   : sl
+    risk_bot  = is_long ? sl  : e
+    tp1_top   = is_long ? tp1 : e
+    tp1_bot   = is_long ? e   : tp1
+    tp2_top   = is_long ? tp2 : tp1
+    tp2_bot   = is_long ? tp1 : tp2
+
+    // Boxes de zonas
+    box.new(bar_index, risk_top, right, risk_bot, bgcolor=C_RISK, border_color=color.new(C_SL,  60), border_width=1)
+    box.new(bar_index, tp1_top,  right, tp1_bot,  bgcolor=C_BOX1, border_color=color.new(C_TP1, 60), border_width=1)
+    box.new(bar_index, tp2_top,  right, tp2_bot,  bgcolor=C_BOX2, border_color=color.new(C_TP2, 60), border_width=1)
+
+    // Líneas de nivel
+    line.new(bar_index, e,   right, e,   color=C_ENTRY, width=2, style=line.style_solid)
+    line.new(bar_index, sl,  right, sl,  color=C_SL,    width=2, style=line.style_solid)
+    line.new(bar_index, tp1, right, tp1, color=C_TP1,   width=2, style=line.style_dashed)
+    line.new(bar_index, tp2, right, tp2, color=C_TP2,   width=2, style=line.style_solid)
+
+    // Etiquetas en extremo derecho
+    sl_dir = is_long ? "-" : "+"
+    label.new(right, e,   "● ENTRY  " + f_price(e),
+         style=label.style_label_left, color=color.new(color.gray, 30), textcolor=color.white, size=size.small)
+    label.new(right, sl,  "✖ SL  "  + f_price(sl)  + "  (" + sl_dir + str.tostring(f_pips(e, sl)) + " pts)",
+         style=label.style_label_left, color=color.new(C_SL,  20), textcolor=color.white, size=size.small)
+    label.new(right, tp1, "◎ TP1  " + f_price(tp1) + "  [1:" + str.tostring(i_rr1, "#.#") + "]  BE aquí",
+         style=label.style_label_left, color=color.new(C_TP1, 20), textcolor=color.white, size=size.small)
+    label.new(right, tp2, "★ TP2  " + f_price(tp2) + "  [1:" + str.tostring(i_rr2, "#.#") + "]",
+         style=label.style_label_left, color=color.new(C_TP2, 20), textcolor=color.white, size=size.small)
+
+    // Label en la vela con resumen completo
+    // Nota: en Pine v5 la concatenación multilínea requiere que cada línea
+    // termine en + y que la primera parte no abra con un ternario suelto.
+    // Se usa una variable intermedia para el encabezado y luego se concatena.
+    lbl_header = is_long ? "▲ BUY" : "▼ SELL"
+    lbl_txt    = lbl_header + "\n" +
+                 "Entry: " + f_price(e)   + "\n" +
+                 "SL: "    + f_price(sl)  + "\n" +
+                 "TP1: "   + f_price(tp1) + "  (1:" + str.tostring(i_rr1, "#.#") + ")\n" +
+                 "TP2: "   + f_price(tp2) + "  (1:" + str.tostring(i_rr2, "#.#") + ")\n" +
+                 "Conf: "  + conf_str
+    lbl_y     = is_long ? low  - atr * 0.8 : high + atr * 0.8
+    lbl_style = is_long ? label.style_label_up : label.style_label_down
+    lbl_col   = is_long ? color.new(color.teal, 10) : color.new(color.red, 10)
+
+    label.new(bar_index, lbl_y, lbl_txt,
+         style=lbl_style, color=lbl_col, textcolor=color.white, size=size.small)
+
+// Ejecutar panel al dispararse una señal
+if i_show_panel
+    conf_str = f_conf_label(ob_score, fvg_score, piv_score, ema_score)
+    if entry_long
+        draw_entry_panel(true,  close, sl_long,  tp1_long,  tp2_long,  conf_str)
+    if entry_short
+        draw_entry_panel(false, close, sl_short, tp1_short, tp2_short, conf_str)
+
+// ═══════════════════════════════════════════════════════════════
+// ⑧ TABLA DE ESTADO — Dashboard top-right
+// ═══════════════════════════════════════════════════════════════
+var table tbl = table.new(position.top_right, 2, 8,
+     bgcolor=color.new(color.black, 70), border_color=color.gray, border_width=1)
+
+if barstate.islast
+    // Fila 0 — Encabezado
+    table.cell(tbl, 0, 0, "FSZ v3 – Estado Actual",
+         text_color=color.yellow, text_size=size.small,
+         bgcolor=color.new(color.gray, 80))
+    table.cell(tbl, 1, 0, "Estatus",
+         text_color=color.yellow, text_size=size.small)
+
+    // Fila 1 — Estructura
+    s_txt = bull_str ? "ALCISTA ▲" : bear_str ? "BAJISTA ▼" : "NEUTRAL"
+    s_col = bull_str ? color.teal  : bear_str ? color.red   : color.gray
+    table.cell(tbl, 0, 1, "Estructura",  text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 1, s_txt,         text_color=s_col,       text_size=size.small)
+
+    // Fila 2 — Precio en zona
+    table.cell(tbl, 0, 2, "Precio en zona Fibo", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 2, price_in_zone ? "SÍ ✓" : "NO",
+         text_color=price_in_zone ? color.green : color.gray, text_size=size.small)
+
+    // Fila 3 — Conteo confluencias
+    c_col = total_conf >= i_min_conf ? color.green : total_conf == 1 ? color.yellow : color.red
+    table.cell(tbl, 0, 3, "Confluencias", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 3, str.tostring(total_conf) + "/" + str.tostring(i_min_conf) + " mín",
+         text_color=c_col, text_size=size.small)
+
+    // Fila 4 — Detalle confluencias activas
+    table.cell(tbl, 0, 4, "Activas",     text_color=color.white,  text_size=size.tiny)
+    table.cell(tbl, 1, 4, f_conf_label(ob_score, fvg_score, piv_score, ema_score) == "" ?
+         "—" : f_conf_label(ob_score, fvg_score, piv_score, ema_score),
+         text_color=color.orange, text_size=size.tiny)
+
+    // Fila 5 — CHoCH
+    ch_txt = choch_bull ? "Bull CHoCH ↑" : choch_bear ? "Bear CHoCH ↓" : "—"
+    ch_col = choch_bull ? color.teal : choch_bear ? color.red : color.gray
+    table.cell(tbl, 0, 5, "CHoCH",  text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 5, ch_txt,   text_color=ch_col,      text_size=size.small)
+
+    // Fila 6 — Zona operable
+    table.cell(tbl, 0, 6, "Zona operable", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 6, zone_valid and price_in_zone ? "✅ VÁLIDA" : "⏳ ESPERA",
+         text_color=zone_valid and price_in_zone ? color.green : color.gray,
+         text_size=size.small)
+
+    // Fila 7 — Señal activa
+    sig_txt = entry_long ? "⬆ BUY" : entry_short ? "⬇ SELL" : "Sin señal"
+    sig_col = entry_long ? color.teal : entry_short ? color.red : color.gray
+    table.cell(tbl, 0, 7, "Señal",   text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 7, sig_txt,   text_color=sig_col,     text_size=size.small)
+
+// ── FIN v3.0 ───────────────────────────────────────────────────
