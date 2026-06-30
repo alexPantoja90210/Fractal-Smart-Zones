@@ -52,6 +52,8 @@ i_show_entry = input.bool (true,  "Mostrar señal de entrada",        group=grp3
 i_show_panel = input.bool (true,  "Mostrar panel SL / TP1 / TP2",   group=grp3)
 i_rr1        = input.float(2.0,   "RR TP1  (mover BE al 1:1)",      step=0.5,  group=grp3)
 i_rr2        = input.float(4.0,   "RR TP2",                         step=0.5,  group=grp3)
+i_sl_buffer  = input.float(0,   "Colchón SL (% del ATR)",         step=0.1, minval=0.0, maxval=5.0, group=grp3,
+     tooltip="0 = SL exacto en el swing. Valores > 0 añaden un colchón de N×ATR×% para evitar stop-hunts.")
 i_panel_bars = input.int  (40,    "Ancho del panel visual (barras)", minval=10, maxval=100, group=grp3)
 
 grp4 = "── Visual"
@@ -278,20 +280,25 @@ f_rejection() =>
     [rej_bull, rej_bear]
 
 // ───────────────────────────────────────────────────────────────
-// f_risk_levels(entry, last_pl, last_ph, atr_val, rr1, rr2)
-//   Calcula SL bajo el fractal + colchón ATR,
-//   y proyecta TP1 y TP2 usando el RR configurado.
+// f_risk_levels(entry, last_pl, last_ph, atr_val, rr1, rr2, sl_buffer)
+//   Calcula SL en el swing ± colchón configurable (sl_buffer % del ATR).
+//   sl_buffer=0 → SL exacto en el pivot | sl_buffer=1 → 1% del ATR de colchón.
+//   Proyecta TP1 y TP2 usando el RR configurado.
 //   Retorna (long): [sl_long, tp1_long, tp2_long]
 //   Retorna (short): [sl_short, tp1_short, tp2_short]
 // ───────────────────────────────────────────────────────────────
-f_risk_levels(entry, last_pl, last_ph, atr_val, rr1, rr2) =>
+f_risk_levels(entry, last_pl, last_ph, atr_val, rr1, rr2, sl_buffer) =>
     // Guards: si los pivots o atr no están disponibles, retornar na
     // para que panel_vars_ok los detecte y no dibuje el panel.
     if na(last_pl) or na(last_ph) or na(atr_val) or na(entry)
         [float(na), float(na), float(na), float(na), float(na), float(na)]
     else
-        sl_long  = last_pl - atr_val * 0.3
-        sl_short = last_ph + atr_val * 0.3
+        // Colchón configurable: SL = swing ± (sl_buffer/100) × ATR
+        // sl_buffer=0 → SL exacto en el swing
+        // sl_buffer=1 → SL = swing ± 1% del ATR (default)
+        buffer   = atr_val * (sl_buffer / 100.0)
+        sl_long  = last_pl - buffer
+        sl_short = last_ph + buffer
 
         risk_long  = entry - sl_long
         risk_short = sl_short - entry
@@ -435,7 +442,7 @@ if not na(ph)
     g_last_ph_bar := bar_index - i_pivot_len
 
 // ── Estructura HH+HL / LH+LL (señales y confluencias)
-g_has_piv = not na(g_last_ph) and not na(g_prev_ph) and  not na(g_last_pl) and not na(g_prev_pl)
+g_has_piv = not na(g_last_ph) and not na(g_prev_ph) and   not na(g_last_pl) and not na(g_prev_pl)
 bull_str  = g_has_piv and g_last_ph > g_prev_ph and g_last_pl > g_prev_pl
 bear_str  = g_has_piv and g_last_ph < g_prev_ph and g_last_pl < g_prev_pl
 
@@ -522,7 +529,7 @@ prob_score = f_probability(bull_str, bear_str, price_in_zone,
 // — Niveles de riesgo
 atr = ta.atr(14)
 [sl_long, tp1_long, tp2_long,
- sl_short, tp1_short, tp2_short] = f_risk_levels(close, last_pl, last_ph, atr, i_rr1, i_rr2)
+ sl_short, tp1_short, tp2_short] = f_risk_levels(close, last_pl, last_ph, atr, i_rr1, i_rr2, i_sl_buffer)
 
 // ═══════════════════════════════════════════════════════════════
 // ⑤ DIBUJO DE ZONAS (Fib box, OB box, FVG box)
@@ -710,7 +717,7 @@ draw_entry_panel(is_long, e, sl, tp1, tp2, conf_str) =>
 //   sl_long/short  — dependen de last_pl/ph + atr (safe si los anteriores son válidos)
 //   tp1/tp2        — dependen de close + riesgo calculado (siempre numérico si sl es válido)
 //   conf_str  — siempre es string (puede ser vacío, nunca na)
-panel_vars_ok = not na(atr) and not na(last_pl) and not na(last_ph) and               not na(sl_long) and not na(sl_short) and                not na(tp1_long) and not na(tp2_long) and               not na(tp1_short) and not na(tp2_short)
+panel_vars_ok = not na(atr) and not na(last_pl) and not na(last_ph) and   not na(sl_long) and not na(sl_short) and          not na(tp1_long) and not na(tp2_long) and            not na(tp1_short) and not na(tp2_short)
 
 if i_show_panel and panel_vars_ok
     conf_str = f_conf_label(ob_score, fvg_score, piv_score, ema_score)
