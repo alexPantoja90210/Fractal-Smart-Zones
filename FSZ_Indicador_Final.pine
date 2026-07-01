@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 // ║   FRACTAL SMART ZONEZ — Indicador Final                     ║
-// ║   by Alex Pantoja                                              ║
+// ║   by Alex Pantoja                                           ║
 // ║   Pine Script v6                                            ║
 // ║                                                             ║
 // ║   Elementos:                                                ║
@@ -8,10 +8,11 @@
 // ║   • Zona dorada FIBO 50% - 61.8%                           ║
 // ║   • Order Block (OB)                                        ║
 // ║   • Fair Value Gap (FVG / Imbalance)                        ║
-// ║   • Pivot Zone (S/R histórico)                              ║
+// ║   • Pivot Zone (S/R historico)                              ║
 // ║   • CHoCH detector                                          ║
-// ║   • Señal de entrada (BUY / SELL)                           ║
-// ║   • Niveles ENTRY · SL · TP1 · TP2 · BE                    ║
+// ║   • Senal de entrada (BUY / SELL)                           ║
+// ║   • Panel OOP: ENTRY · SL · TP1 · TP2 · BE                 ║
+// ║   • Historial de trades persistente (backtest)              ║
 // ║   • Tabla de estado en tiempo real                          ║
 // ║   • Alertas configurables                                   ║
 // ╚══════════════════════════════════════════════════════════════╝
@@ -26,54 +27,56 @@ indicator("Fractal Smart Zonez [Alex Pantoja]", overlay = true, max_boxes_count 
 int i_lookback = input.int(5, "Lookback Fractal", minval = 2, maxval = 10, tooltip = "Barras a cada lado para confirmar un swing high/low", group = "1  Fractales")
 
 // ── 2. Confluencias ───────────────────────────────────────────
-int   i_ob_lb     = input.int(3,    "Lookback Order Block",   minval = 1, maxval = 15,   group = "2  Confluencias")
-float i_fvg_min   = input.float(0.0,"FVG tamano minimo (pts)", minval = 0.0, step = 0.1, group = "2  Confluencias", tooltip = "Filtrar FVGs muy pequeños. 0 = todos")
-int   i_min_conf  = input.int(2,    "Confluencias minimas",    minval = 1, maxval = 3,   group = "2  Confluencias", tooltip = "Minimo de elementos (OB+FVG+Pivot) para zona operable")
+int   i_ob_lb    = input.int(3,    "Lookback Order Block",    minval = 1, maxval = 15,  group = "2  Confluencias")
+float i_fvg_min  = input.float(0.0,"FVG tamano minimo (pts)", minval = 0.0, step = 0.1, group = "2  Confluencias", tooltip = "Filtrar FVGs muy pequenos. 0 = todos")
+int   i_min_conf = input.int(2,    "Confluencias minimas",    minval = 1, maxval = 3,   group = "2  Confluencias", tooltip = "Minimo de elementos (OB+FVG+Pivot) para zona operable")
 
-// ── 3. Confirmación ───────────────────────────────────────────
-float i_wick_rat  = input.float(0.6, "Ratio mecha rechazo", minval = 0.3, maxval = 0.9, step = 0.05, group = "3  Confirmacion", tooltip = "% del rango que debe ocupar la mecha para pin bar. 0.6 = 60%")
+// ── 3. Confirmacion ───────────────────────────────────────────
+float i_wick_rat = input.float(0.6, "Ratio mecha rechazo", minval = 0.3, maxval = 0.9, step = 0.05, group = "3  Confirmacion", tooltip = "% del rango que debe ocupar la mecha para pin bar. 0.6 = 60%")
 
-// ── 4. Gestión ────────────────────────────────────────────────
-float i_rr_tp1    = input.float(2.0, "RR TP1 (parcial 50%)", minval = 1.0, step = 0.5, group = "4  Gestion")
-float i_rr_tp2    = input.float(4.0, "RR TP2 (restante 50%)", minval = 2.0, step = 0.5, group = "4  Gestion")
-float i_sl_buf    = input.float(0.1, "SL buffer (%)",         minval = 0.0, step = 0.05, group = "4  Gestion", tooltip = "Margen adicional bajo el OB para el Stop Loss")
+// ── 4. Gestion ────────────────────────────────────────────────
+float i_rr_tp1   = input.float(2.0, "RR TP1 (parcial 50%)",  minval = 1.0, step = 0.5, group = "4  Gestion")
+float i_rr_tp2   = input.float(4.0, "RR TP2 (restante 50%)", minval = 2.0, step = 0.5, group = "4  Gestion")
+float i_sl_buf   = input.float(0.1, "SL buffer (%)",          minval = 0.0, step = 0.05, group = "4  Gestion", tooltip = "Margen adicional bajo el OB para el Stop Loss")
 
 // ── 5. Visual ─────────────────────────────────────────────────
-bool i_show_frac  = input.bool(true,  "Mostrar Fractal Box",         group = "5  Visual")
-bool i_show_fibo  = input.bool(true,  "Mostrar Zona FIBO 50-61.8%", group = "5  Visual")
-bool i_show_ob    = input.bool(true,  "Mostrar Order Block",         group = "5  Visual")
-bool i_show_fvg   = input.bool(true,  "Mostrar FVG / Imbalance",    group = "5  Visual")
-bool i_show_pivot = input.bool(true,  "Mostrar Pivot Zone",          group = "5  Visual")
-bool i_show_sig   = input.bool(true,  "Mostrar Senal SL/TP",        group = "5  Visual")
-bool i_show_table = input.bool(true,  "Mostrar Tabla Estado",        group = "5  Visual")
-bool i_show_bg    = input.bool(true,  "Mostrar Fondo Zona",          group = "5  Visual")
-int  i_frac_ext   = input.int(6,     "Extension fractal (barras)",   minval = 1, maxval = 30, group = "5  Visual")
-int  i_zone_ext   = input.int(25,    "Extension zonas (barras)",     minval = 5, maxval = 80, group = "5  Visual")
+bool i_show_frac    = input.bool(true,  "Mostrar Fractal Box",           group = "5  Visual")
+bool i_show_fibo    = input.bool(true,  "Mostrar Zona FIBO 50-61.8%",   group = "5  Visual")
+bool i_show_ob      = input.bool(true,  "Mostrar Order Block",           group = "5  Visual")
+bool i_show_fvg     = input.bool(true,  "Mostrar FVG / Imbalance",      group = "5  Visual")
+bool i_show_pivot   = input.bool(true,  "Mostrar Pivot Zone",            group = "5  Visual")
+bool i_show_sig     = input.bool(true,  "Mostrar Panel Trade activo",    group = "5  Visual")
+bool i_show_history = input.bool(true,  "Mostrar Historial de trades",   group = "5  Visual")
+bool i_show_table   = input.bool(true,  "Mostrar Tabla Estado",          group = "5  Visual")
+bool i_show_bg      = input.bool(true,  "Mostrar Fondo Zona",            group = "5  Visual")
+int  i_max_trades   = input.int(30,    "Max trades en historial",        minval = 5, maxval = 100, group = "5  Visual", tooltip = "Limite de trades historicos dibujados para no saturar el grafico")
+int  i_frac_ext     = input.int(6,     "Extension fractal (barras)",     minval = 1, maxval = 30, group = "5  Visual")
+int  i_zone_ext     = input.int(25,    "Extension zonas (barras)",       minval = 5, maxval = 80, group = "5  Visual")
 
 // ── 6. Colores ────────────────────────────────────────────────
-color c_bull      = input.color(color.new(color.blue,   78), "Fractal Alcista",  group = "6  Colores")
-color c_bear      = input.color(color.new(color.red,    78), "Fractal Bajista",  group = "6  Colores")
-color c_fibo      = input.color(color.new(color.yellow, 82), "Zona FIBO",        group = "6  Colores")
-color c_ob        = input.color(color.new(color.purple, 75), "Order Block",      group = "6  Colores")
-color c_fvg       = input.color(color.new(color.orange, 78), "FVG Imbalance",    group = "6  Colores")
-color c_pivot     = input.color(color.new(color.aqua,   78), "Pivot Zone",       group = "6  Colores")
+color c_bull  = input.color(color.new(color.blue,   78), "Fractal Alcista", group = "6  Colores")
+color c_bear  = input.color(color.new(color.red,    78), "Fractal Bajista", group = "6  Colores")
+color c_fibo  = input.color(color.new(color.yellow, 82), "Zona FIBO",       group = "6  Colores")
+color c_ob    = input.color(color.new(color.purple, 75), "Order Block",     group = "6  Colores")
+color c_fvg   = input.color(color.new(color.orange, 78), "FVG Imbalance",   group = "6  Colores")
+color c_pivot = input.color(color.new(color.aqua,   78), "Pivot Zone",      group = "6  Colores")
 
 // ═══════════════════════════════════════════════════════════════
-// UDTs (User Defined Types)
+// UDTs
 // ═══════════════════════════════════════════════════════════════
 
 // ── FSZ_Fractal ───────────────────────────────────────────────
 type FSZ_Fractal
-    float swing_high    // Precio máximo del fractal
-    float swing_low     // Precio mínimo del fractal
-    int   bar_high      // Índice de barra del swing high
-    int   bar_low       // Índice de barra del swing low
-    bool  is_bullish    // true = alcista (SL antes del SH)
+    float swing_high
+    float swing_low
+    int   bar_high
+    int   bar_low
+    bool  is_bullish
 
 // ── FSZ_FiboZone ──────────────────────────────────────────────
 type FSZ_FiboZone
-    float zone_top      // 50% (alcista) o 61.8% (bajista)
-    float zone_bottom   // 61.8% (alcista) o 50% (bajista)
+    float zone_top
+    float zone_bottom
     float level_382
     float level_50
     float level_618
@@ -125,9 +128,10 @@ method conf_update(FSZ_Confluence self, int min_s) =>
     self.is_valid := self.score >= min_s
 
 // ── FSZ_SetupState ────────────────────────────────────────────
-// Gestiona la señal activa y sus niveles de precio.
-// Los objetos visuales viven DENTRO del UDT (estilo Gold System):
-// se borran y recrean en cada barra → panel siempre al día.
+// Panel OOP estilo Gold System.
+// Los 7 objetos visuales viven dentro del UDT: se borran y
+// recrean en cada barra para el trade activo, o quedan fijos
+// con borde en closeBar para el historial.
 type FSZ_SetupState
     bool   active
     bool   is_long
@@ -136,11 +140,12 @@ type FSZ_SetupState
     float  tp1
     float  tp2
     int    bar_entry
+    int    bar_close         // barra donde cerro (fija el ancho historico)
     bool   be_triggered
     bool   tp1_hit
     bool   tp2_hit
     bool   sl_hit
-    // Objetos visuales del panel (persistentes, estilo Gold System)
+    // Objetos visuales propios del panel
     line   ln_entry
     line   ln_sl
     line   ln_tp1
@@ -149,6 +154,7 @@ type FSZ_SetupState
     box    bx_rew
     label  lb_info
 
+// Borrar todos los objetos visuales del panel
 method setup_erase(FSZ_SetupState self) =>
     line.delete(self.ln_entry)
     line.delete(self.ln_sl)
@@ -158,6 +164,7 @@ method setup_erase(FSZ_SetupState self) =>
     box.delete(self.bx_rew)
     label.delete(self.lb_info)
 
+// Reset completo: borra visual + reinicia todos los campos
 method setup_reset(FSZ_SetupState self) =>
     self.setup_erase()
     self.active       := false
@@ -167,84 +174,93 @@ method setup_reset(FSZ_SetupState self) =>
     self.tp1          := 0.0
     self.tp2          := 0.0
     self.bar_entry    := 0
+    self.bar_close    := 0
     self.be_triggered := false
     self.tp1_hit      := false
     self.tp2_hit      := false
     self.sl_hit       := false
 
-// method: dibujar/actualizar el panel visual (estilo Gold System).
-// Borra objetos anteriores y los recrea — siempre actualizado.
+// Dibujar/actualizar el panel visual.
+// rightBar = bar_index+ext si activo, bar_close si historico.
 method setup_draw(FSZ_SetupState self, int right_bar, color col_bull, color col_bear, float rr1, float rr2) =>
     self.setup_erase()
-    color tcol = self.is_long ? col_bull : col_bear
-    int   L    = self.bar_entry
-    int   R    = right_bar
-    // Líneas de niveles
-    self.ln_entry := line.new(L, self.entry_price, R, self.entry_price, color = color.new(color.gray, 0),  width = 2)
-    self.ln_sl    := line.new(L, self.stop_loss,   R, self.stop_loss,   color = color.new(col_bear,  0),   width = 2)
-    self.ln_tp1   := line.new(L, self.tp1,         R, self.tp1,         color = color.new(col_bull,  0),   width = 1, style = line.style_dashed)
-    self.ln_tp2   := line.new(L, self.tp2,         R, self.tp2,         color = color.new(col_bull,  0),   width = 2)
-    // Caja de riesgo (entry → SL) y recompensa (entry → TP2)
-    self.bx_risk  := box.new(L, self.entry_price, R, self.stop_loss,   bgcolor = color.new(col_bear, 88), border_color = color.new(col_bear, 55), border_width = 1)
-    self.bx_rew   := box.new(L, self.entry_price, R, self.tp2,         bgcolor = color.new(col_bull, 91), border_color = color.new(col_bull, 55), border_width = 1)
-    // Label de información completa
+    color tcol     = self.is_long ? col_bull : col_bear
+    int   L        = self.bar_entry
+    int   R        = right_bar
+    // Lineas de niveles
+    self.ln_entry  := line.new(L, self.entry_price, R, self.entry_price, color = color.new(color.gray, 0), width = 2)
+    self.ln_sl     := line.new(L, self.stop_loss,   R, self.stop_loss,   color = color.new(col_bear,   0), width = 2)
+    self.ln_tp1    := line.new(L, self.tp1,         R, self.tp1,         color = color.new(col_bull,   0), width = 1, style = line.style_dashed)
+    self.ln_tp2    := line.new(L, self.tp2,         R, self.tp2,         color = color.new(col_bull,   0), width = 2)
+    // Cajas de riesgo (entry->SL) y recompensa (entry->TP2)
+    self.bx_risk   := box.new(L, self.entry_price, R, self.stop_loss, bgcolor = color.new(col_bear, 88), border_color = color.new(col_bear, 55), border_width = 1)
+    self.bx_rew    := box.new(L, self.entry_price, R, self.tp2,       bgcolor = color.new(col_bull, 91), border_color = color.new(col_bull, 55), border_width = 1)
+    // Label con info completa
     string be_txt  = self.be_triggered ? "  [BE]" : ""
-    string res_txt = self.sl_hit ? "  → SL" : self.tp2_hit ? "  → TP2" : self.tp1_hit ? "  → TP1" : ""
-    string dir_txt = self.is_long ? "▲ BUY" : "▼ SELL"
+    string res_txt = self.sl_hit ? "  -> SL" : self.tp2_hit ? "  -> TP2" : self.tp1_hit ? "  -> TP1" : ""
+    string dir_txt = self.is_long ? "BUY" : "SELL"
     string info    = dir_txt + be_txt + res_txt + "\nEntry: " + str.tostring(self.entry_price, "#.####") + "\nSL:    " + str.tostring(self.stop_loss, "#.####") + "\nTP1:   " + str.tostring(self.tp1, "#.####") + "  (1:" + str.tostring(rr1, "#.#") + ")\nTP2:   " + str.tostring(self.tp2, "#.####") + "  (1:" + str.tostring(rr2, "#.#") + ")"
-    string ls = self.is_long ? label.style_label_up : label.style_label_down
-    float lb_price = self.is_long ? self.stop_loss : self.tp2
-    self.lb_info  := label.new(L, lb_price, info, style = ls, color = color.new(tcol, 12), textcolor = color.white, size = size.small)
+    string ls      = self.is_long ? label.style_label_up : label.style_label_down
+    float  lb_pr   = self.is_long ? self.stop_loss : self.tp2
+    self.lb_info   := label.new(L, lb_pr, info, style = ls, color = color.new(tcol, 12), textcolor = color.white, size = size.small)
 
+// Abrir un nuevo trade
 method setup_enter(FSZ_SetupState self, bool long, float entry, float sl_ref, float rr1, float rr2) =>
-    self.active      := true
-    self.is_long     := long
-    self.entry_price := entry
-    self.bar_entry   := bar_index
+    self.active       := true
+    self.is_long      := long
+    self.entry_price  := entry
+    self.bar_entry    := bar_index
+    self.bar_close    := 0
     self.be_triggered := false
-    self.tp1_hit     := false
-    self.tp2_hit     := false
-    self.sl_hit      := false
-    float risk       = math.abs(entry - sl_ref)
-    float buf        = risk * (i_sl_buf / 100.0)
-    self.stop_loss   := long ? sl_ref - buf : sl_ref + buf
-    self.tp1         := long ? entry + risk * rr1 : entry - risk * rr1
-    self.tp2         := long ? entry + risk * rr2 : entry - risk * rr2
+    self.tp1_hit      := false
+    self.tp2_hit      := false
+    self.sl_hit       := false
+    float risk        = math.abs(entry - sl_ref)
+    float buf         = risk * (i_sl_buf / 100.0)
+    self.stop_loss    := long ? sl_ref - buf : sl_ref + buf
+    self.tp1          := long ? entry + risk * rr1 : entry - risk * rr1
+    self.tp2          := long ? entry + risk * rr2 : entry - risk * rr2
 
+// Gestionar precio barra a barra
 method setup_update(FSZ_SetupState self) =>
     if self.active
         if self.is_long
             if high >= self.tp2 and not self.tp2_hit
-                self.tp2_hit := true
-                self.active  := false
+                self.tp2_hit   := true
+                self.active    := false
+                self.bar_close := bar_index
             else if high >= self.tp1 and not self.tp1_hit
                 self.tp1_hit      := true
                 self.be_triggered := true
             else if low <= (self.be_triggered ? self.entry_price : self.stop_loss)
-                self.sl_hit := not self.be_triggered
-                self.active := false
+                self.sl_hit    := not self.be_triggered
+                self.active    := false
+                self.bar_close := bar_index
         else
             if low <= self.tp2 and not self.tp2_hit
-                self.tp2_hit := true
-                self.active  := false
+                self.tp2_hit   := true
+                self.active    := false
+                self.bar_close := bar_index
             else if low <= self.tp1 and not self.tp1_hit
                 self.tp1_hit      := true
                 self.be_triggered := true
             else if high >= (self.be_triggered ? self.entry_price : self.stop_loss)
-                self.sl_hit := not self.be_triggered
-                self.active := false
+                self.sl_hit    := not self.be_triggered
+                self.active    := false
+                self.bar_close := bar_index
+    // Dummy bool al final: fuerza tipo de retorno consistente en todos los bloques
+    self.active
 
 method setup_status(FSZ_SetupState self) =>
     if not self.active
-        self.tp2_hit ? "TP2 alcanzado" : self.tp1_hit ? "TP1 + BE" : self.sl_hit ? "SL" : "BE salida"
+        self.tp2_hit ? "TP2" : self.tp1_hit ? "TP1+BE" : self.sl_hit ? "SL" : "BE"
     else
         self.be_triggered ? "BE activo" : "En curso"
 
 // ═══════════════════════════════════════════════════════════════
-// FUNCIONES DE DETECCIÓN
+// FUNCIONES DE DETECCION
 // ═══════════════════════════════════════════════════════════════
 
-// Swing High
 f_is_sh(int lb) =>
     bool ok = true
     for i = 1 to lb
@@ -252,7 +268,6 @@ f_is_sh(int lb) =>
             ok := false
     ok
 
-// Swing Low
 f_is_sl(int lb) =>
     bool ok = true
     for i = 1 to lb
@@ -260,7 +275,6 @@ f_is_sl(int lb) =>
             ok := false
     ok
 
-// Order Block — última vela opuesta al impulso que toca la zona
 f_ob(float zt, float zb, int lb, bool bull) =>
     bool  found = false
     float oh    = 0.0
@@ -277,14 +291,12 @@ f_ob(float zt, float zb, int lb, bool bull) =>
             ol    := low[i]
     [found, oh, ol]
 
-// Fair Value Gap — hueco de 3 velas cuyo centro toca la zona
 f_fvg(float zt, float zb, float min_sz) =>
     bool  found = false
     float fh    = 0.0
     float fl    = 0.0
     for i = 1 to 30
         if not found
-            // FVG alcista: mecha baja[i-1] > mecha alta[i+1]
             if low[i - 1] > high[i + 1]
                 float sz  = low[i - 1] - high[i + 1]
                 float mid = (low[i - 1] + high[i + 1]) / 2.0
@@ -292,7 +304,6 @@ f_fvg(float zt, float zb, float min_sz) =>
                     found := true
                     fh    := low[i - 1]
                     fl    := high[i + 1]
-            // FVG bajista: mecha alta[i-1] < mecha baja[i+1]
             if high[i - 1] < low[i + 1]
                 float sz  = low[i + 1] - high[i - 1]
                 float mid = (high[i - 1] + low[i + 1]) / 2.0
@@ -302,7 +313,6 @@ f_fvg(float zt, float zb, float min_sz) =>
                     fl    := high[i - 1]
     [found, fh, fl]
 
-// Pivot Zone — máximos/mínimos históricos que caen dentro de la zona
 f_pivot(float zt, float zb) =>
     bool  found = false
     float ph    = 0.0
@@ -319,7 +329,6 @@ f_pivot(float zt, float zb) =>
                 pl    := low[i]
     [found, ph, pl]
 
-// CHoCH — rotura de estructura menor en la zona (M5 simplificado)
 f_choch(bool bull, float zt, float zb) =>
     bool found = false
     if bull
@@ -332,21 +341,16 @@ f_choch(bool bull, float zt, float zb) =>
             found := true
     found
 
-// Vela de rechazo — pin bar, engulfing o mecha fuerte
 f_rejection(bool long, float wr) =>
-    float body  = math.abs(close - open)
-    float rng   = high - low
-    float dw    = math.min(close, open) - low
-    float uw    = high - math.max(close, open)
+    float body = math.abs(close - open)
+    float rng  = high - low
+    float dw   = math.min(close, open) - low
+    float uw   = high - math.max(close, open)
     bool  found = false
     if long
-        found := (dw > rng * wr and body < rng * 0.35) or
-                  (close > open and close > high[1] and open < low[1]) or
-                  (dw > body * 2.0)
+        found := (dw > rng * wr and body < rng * 0.35) or (close > open and close > high[1] and open < low[1]) or (dw > body * 2.0)
     else
-        found := (uw > rng * wr and body < rng * 0.35) or
-                  (close < open and close < low[1] and open > high[1]) or
-                  (uw > body * 2.0)
+        found := (uw > rng * wr and body < rng * 0.35) or (close < open and close < low[1] and open > high[1]) or (uw > body * 2.0)
     found
 
 // ═══════════════════════════════════════════════════════════════
@@ -355,7 +359,19 @@ f_rejection(bool long, float wr) =>
 var FSZ_Fractal    g_frac  = na
 var FSZ_FiboZone   g_fibo  = na
 var FSZ_Confluence g_conf  = na
-var FSZ_SetupState g_setup = FSZ_SetupState.new(false, false, 0.0, 0.0, 0.0, 0.0, 0, false, false, false, false, na, na, na, na, na, na, na)
+
+// Trade activo — se redibuja cada barra
+var FSZ_SetupState g_setup = FSZ_SetupState.new(false, false, 0.0, 0.0, 0.0, 0.0, 0, 0, false, false, false, false, na, na, na, na, na, na, na)
+
+// Historial de trades cerrados — persisten con borde fijo en closeBar
+var array<FSZ_SetupState> g_history = array.new<FSZ_SetupState>()
+
+// Estadisticas acumuladas
+var int   g_wins   = 0
+var int   g_losses = 0
+var int   g_be     = 0
+var float g_net_rr = 0.0
+var string g_last_result = ""
 
 var float pending_sh     = na
 var float pending_sl     = na
@@ -365,10 +381,10 @@ var bool  choch_found    = false
 var bool  wait_rej       = false
 
 // ═══════════════════════════════════════════════════════════════
-// LÓGICA PRINCIPAL (barra a barra)
+// LOGICA PRINCIPAL (barra a barra)
 // ═══════════════════════════════════════════════════════════════
 
-// ── Paso 1: Detectar swings ───────────────────────────────────
+// ── Paso 1: Swings ────────────────────────────────────────────
 bool is_sh = f_is_sh(i_lookback)
 bool is_sl = f_is_sl(i_lookback)
 
@@ -380,7 +396,7 @@ if is_sl
     pending_sl     := low[i_lookback]
     pending_sl_bar := bar_index - i_lookback
 
-// ── Paso 2: Construir fractal + zona FIBO ─────────────────────
+// ── Paso 2: Nuevo fractal → resetear busqueda ─────────────────
 if not na(pending_sh) and not na(pending_sl)
     bool bull = pending_sl_bar < pending_sh_bar
     g_frac := FSZ_Fractal.new(pending_sh, pending_sl, pending_sh_bar, pending_sl_bar, bull)
@@ -389,16 +405,18 @@ if not na(pending_sh) and not na(pending_sl)
     g_conf      := na
     choch_found := false
     wait_rej    := false
-    g_setup.setup_reset()
+    // Solo resetear setup si NO hay trade activo (no interrumpir trade en curso)
+    if not g_setup.active
+        g_setup.setup_reset()
     pending_sh     := na
     pending_sl     := na
     pending_sh_bar := na
     pending_sl_bar := na
 
-// ── Paso 3: Precio en zona → buscar confluencias ──────────────
+// ── Paso 3: Confluencias ──────────────────────────────────────
 bool piz = not na(g_fibo) ? g_fibo.fz_check(close) : false
 
-if piz and not na(g_fibo) and not na(g_frac)
+if piz and not na(g_fibo) and not na(g_frac) and not g_setup.active
     bool bull = g_frac.is_bullish
     [ob_f, ob_h, ob_l]    = f_ob(g_fibo.zone_top, g_fibo.zone_bottom, i_ob_lb, bull)
     [fvg_f, fvg_h, fvg_l] = f_fvg(g_fibo.zone_top, g_fibo.zone_bottom, i_fvg_min)
@@ -406,13 +424,13 @@ if piz and not na(g_fibo) and not na(g_frac)
     g_conf := FSZ_Confluence.new(ob_f, ob_h, ob_l, fvg_f, fvg_h, fvg_l, piv_f, piv_h, piv_l, 0, false)
     g_conf.conf_update(i_min_conf)
 
-// ── Paso 4: CHoCH cuando zona es válida ───────────────────────
-if not na(g_conf) and g_conf.is_valid and not choch_found and not na(g_frac)
+// ── Paso 4: CHoCH ─────────────────────────────────────────────
+if not na(g_conf) and g_conf.is_valid and not choch_found and not na(g_frac) and not g_setup.active
     if f_choch(g_frac.is_bullish, g_fibo.zone_top, g_fibo.zone_bottom)
         choch_found := true
         wait_rej    := true
 
-// ── Paso 5: Vela de rechazo → generar señal ──────────────────
+// ── Paso 5: Vela de rechazo → abrir trade ─────────────────────
 bool new_signal = false
 if wait_rej and piz and not na(g_frac) and not g_setup.active
     bool bull = g_frac.is_bullish
@@ -422,34 +440,80 @@ if wait_rej and piz and not na(g_frac) and not g_setup.active
         wait_rej   := false
         new_signal := true
 
-// ── Paso 6: Actualizar setup activo ───────────────────────────
+// ── Paso 6: Gestionar trade activo ────────────────────────────
+bool just_closed = false
 if g_setup.active
+    bool was_active = g_setup.active
     g_setup.setup_update()
+    // Acaba de cerrar esta barra
+    if was_active and not g_setup.active
+        just_closed := true
+        // Actualizar estadisticas
+        if g_setup.tp2_hit
+            g_wins     += 1
+            g_net_rr   += i_rr_tp1 * 0.5 + i_rr_tp2 * 0.5
+            g_last_result := "TP2"
+        else if g_setup.tp1_hit
+            g_wins     += 1
+            g_net_rr   += i_rr_tp1 * 0.5
+            g_last_result := "TP1+BE"
+        else if g_setup.sl_hit
+            g_losses   += 1
+            g_net_rr   -= 1.0
+            g_last_result := "SL"
+        else
+            g_be       += 1
+            g_last_result := "BE"
+
+// ── Paso 7: Archivar trade cerrado en historial ───────────────
+// Al cerrar: copia el estado al historial con borde fijo en bar_close.
+// Si supera el maximo configurado, borra el mas antiguo (erase + shift).
+if just_closed and i_show_history
+    // Clonar el setup cerrado en un nuevo objeto para el historial
+    FSZ_SetupState archived = FSZ_SetupState.new(
+         g_setup.active, g_setup.is_long,
+         g_setup.entry_price, g_setup.stop_loss, g_setup.tp1, g_setup.tp2,
+         g_setup.bar_entry, g_setup.bar_close,
+         g_setup.be_triggered, g_setup.tp1_hit, g_setup.tp2_hit, g_setup.sl_hit,
+         na, na, na, na, na, na, na)
+    // Dibujar el panel historico con borde fijo en bar_close
+    archived.setup_draw(g_setup.bar_close, c_bull, c_bear, i_rr_tp1, i_rr_tp2)
+    array.push(g_history, archived)
+    // Limitar cantidad: borrar el mas antiguo si excede el maximo
+    if array.size(g_history) > i_max_trades
+        FSZ_SetupState oldest = array.shift(g_history)
+        oldest.setup_erase()
 
 // ═══════════════════════════════════════════════════════════════
-// SEÑALES EN GRÁFICO (plotshape)
+// SENALES EN GRAFICO
 // ═══════════════════════════════════════════════════════════════
 plotshape(is_sh, "SH", shape.triangledown, location.abovebar, color.new(color.red,  0), size = size.tiny)
 plotshape(is_sl, "SL", shape.triangleup,   location.belowbar, color.new(color.blue, 0), size = size.tiny)
 
 bool buy_sig  = new_signal and g_setup.is_long
 bool sell_sig = new_signal and not g_setup.is_long
-plotshape(buy_sig,  "BUY",  shape.arrowup,   location.belowbar, color.new(color.lime, 0), size = size.normal)
-plotshape(sell_sig, "SELL", shape.arrowdown,  location.abovebar, color.new(color.red,  0), size = size.normal)
+plotshape(buy_sig,  "BUY",  shape.arrowup,   location.belowbar, color.new(color.lime, 0), size = size.normal, text = "BUY")
+plotshape(sell_sig, "SELL", shape.arrowdown,  location.abovebar, color.new(color.red,  0), size = size.normal, text = "SELL")
 
-// ── Fondo de estado ───────────────────────────────────────────
+// Fondo de zona
 bgcolor(i_show_bg and piz                 ? color.new(color.yellow, 93) : na, title = "En zona FIBO")
 bgcolor(i_show_bg and choch_found and piz ? color.new(color.green,  90) : na, title = "CHoCH activo")
 
 // ═══════════════════════════════════════════════════════════════
-// VISUALIZACIÓN DE ZONAS (solo en última barra)
+// PANEL DEL TRADE ACTIVO (se redibuja cada barra)
+// ═══════════════════════════════════════════════════════════════
+if i_show_sig and g_setup.active
+    g_setup.setup_draw(bar_index + 45, c_bull, c_bear, i_rr_tp1, i_rr_tp2)
+
+// ═══════════════════════════════════════════════════════════════
+// VISUALIZACION DE ZONAS (solo en ultima barra)
 // ═══════════════════════════════════════════════════════════════
 if barstate.islast and not na(g_frac) and not na(g_fibo)
     int frac_l = math.min(g_frac.bar_high, g_frac.bar_low)
     int frac_r = math.max(g_frac.bar_high, g_frac.bar_low)
     int zone_r = bar_index + i_zone_ext
 
-    // ── 1. FRACTAL BOX ────────────────────────────────────────
+    // 1. FRACTAL BOX
     if i_show_frac
         color fb = g_frac.is_bullish ? c_bull : c_bear
         color fd = g_frac.is_bullish ? color.new(color.blue, 25) : color.new(color.red, 25)
@@ -457,102 +521,110 @@ if barstate.islast and not na(g_frac) and not na(g_fibo)
         label.new(frac_r + i_frac_ext, g_frac.swing_high, "SH  " + str.tostring(g_frac.swing_high, "#.####"), style = label.style_label_left, color = color.new(color.red,  65), textcolor = color.red,  size = size.tiny)
         label.new(frac_r + i_frac_ext, g_frac.swing_low,  "SL  " + str.tostring(g_frac.swing_low,  "#.####"), style = label.style_label_left, color = color.new(color.blue, 65), textcolor = color.blue, size = size.tiny)
 
-    // ── 2. ZONA FIBO 50%-61.8% ───────────────────────────────
+    // 2. ZONA FIBO
     if i_show_fibo
         box.new(frac_l, g_fibo.zone_top, zone_r, g_fibo.zone_bottom, border_color = color.new(color.yellow, 25), bgcolor = c_fibo, border_width = 2, border_style = line.style_dashed)
         line.new(frac_l, g_fibo.level_382, zone_r, g_fibo.level_382, color = color.new(color.gray,   35), width = 1, style = line.style_dotted)
         line.new(frac_l, g_fibo.level_50,  zone_r, g_fibo.level_50,  color = color.new(color.yellow,  5), width = 2)
         line.new(frac_l, g_fibo.level_618, zone_r, g_fibo.level_618, color = color.new(color.yellow,  5), width = 2)
         line.new(frac_l, g_fibo.level_786, zone_r, g_fibo.level_786, color = color.new(color.gray,   35), width = 1, style = line.style_dotted)
-        label.new(zone_r, g_fibo.level_50,  "50.0%",  style = label.style_label_left, color = color.new(color.yellow, 45), textcolor = color.yellow, size = size.tiny)
-        label.new(zone_r, g_fibo.level_618, "61.8%",  style = label.style_label_left, color = color.new(color.yellow, 45), textcolor = color.yellow, size = size.tiny)
-        label.new(zone_r, g_fibo.level_382, "38.2%",  style = label.style_label_left, color = color.new(color.gray,   55), textcolor = color.gray,   size = size.tiny)
-        label.new(zone_r, g_fibo.level_786, "78.6%",  style = label.style_label_left, color = color.new(color.gray,   55), textcolor = color.gray,   size = size.tiny)
+        label.new(zone_r, g_fibo.level_50,  "50.0%", style = label.style_label_left, color = color.new(color.yellow, 45), textcolor = color.yellow, size = size.tiny)
+        label.new(zone_r, g_fibo.level_618, "61.8%", style = label.style_label_left, color = color.new(color.yellow, 45), textcolor = color.yellow, size = size.tiny)
+        label.new(zone_r, g_fibo.level_382, "38.2%", style = label.style_label_left, color = color.new(color.gray,   55), textcolor = color.gray,   size = size.tiny)
+        label.new(zone_r, g_fibo.level_786, "78.6%", style = label.style_label_left, color = color.new(color.gray,   55), textcolor = color.gray,   size = size.tiny)
 
-    // ── 3. ORDER BLOCK ────────────────────────────────────────
+    // 3. ORDER BLOCK
     if i_show_ob and not na(g_conf) and g_conf.ob_detected
         box.new(frac_l, g_conf.ob_high, zone_r, g_conf.ob_low, border_color = color.new(color.purple, 15), bgcolor = c_ob, border_width = 2)
         label.new(zone_r, g_conf.ob_high, "OB  " + str.tostring(g_conf.ob_high, "#.####"), style = label.style_label_left, color = color.new(color.purple, 35), textcolor = color.white, size = size.tiny)
         label.new(zone_r, g_conf.ob_low,  "     " + str.tostring(g_conf.ob_low,  "#.####"), style = label.style_label_left, color = color.new(color.purple, 55), textcolor = color.white, size = size.tiny)
 
-    // ── 4. FVG / IMBALANCE ───────────────────────────────────
+    // 4. FVG / IMBALANCE
     if i_show_fvg and not na(g_conf) and g_conf.fvg_detected
         box.new(frac_l, g_conf.fvg_high, zone_r, g_conf.fvg_low, border_color = color.new(color.orange, 15), bgcolor = c_fvg, border_width = 2)
         label.new(zone_r, g_conf.fvg_high, "FVG  " + str.tostring(g_conf.fvg_high, "#.####"), style = label.style_label_left, color = color.new(color.orange, 35), textcolor = color.white, size = size.tiny)
         label.new(zone_r, g_conf.fvg_low,  "      " + str.tostring(g_conf.fvg_low,  "#.####"), style = label.style_label_left, color = color.new(color.orange, 55), textcolor = color.white, size = size.tiny)
 
-    // ── 5. PIVOT ZONE ────────────────────────────────────────
+    // 5. PIVOT ZONE
     if i_show_pivot and not na(g_conf) and g_conf.pivot_detected
         line.new(frac_l, g_conf.pivot_high, zone_r, g_conf.pivot_high, color = color.new(color.aqua, 15), width = 2, style = line.style_dashed)
         if g_conf.pivot_high != g_conf.pivot_low
             box.new(frac_l, g_conf.pivot_high, zone_r, g_conf.pivot_low, border_color = color.new(color.aqua, 15), bgcolor = c_pivot, border_width = 1, border_style = line.style_dashed)
         label.new(zone_r, g_conf.pivot_high, "PIV  " + str.tostring(g_conf.pivot_high, "#.####"), style = label.style_label_left, color = color.new(color.aqua, 35), textcolor = color.white, size = size.tiny)
 
-// ── 6. PANEL DEL TRADE (estilo Gold System — OOP persistente) ───────────
-// El panel se redibuja en cada barra extendiendo el borde derecho.
-// Los objetos viven dentro del UDT: borra los anteriores y recrea.
-if i_show_sig and g_setup.active
-    g_setup.setup_draw(bar_index + 45, c_bull, c_bear, i_rr_tp1, i_rr_tp2)
-
 // ═══════════════════════════════════════════════════════════════
 // TABLA DE ESTADO EN TIEMPO REAL
 // ═══════════════════════════════════════════════════════════════
-var table tbl = table.new(position.top_right, 2, 14, bgcolor = color.new(color.black, 80), border_color = color.new(color.gray, 45), border_width = 1)
+var table tbl = table.new(position.top_right, 2, 17, bgcolor = color.new(color.black, 80), border_color = color.new(color.gray, 45), border_width = 1)
 
 if barstate.islast and i_show_table
     // Encabezado
-    table.cell(tbl, 0, 0, "FSZ — Estado Actual", text_color = color.white,  text_size = size.small)
-    table.cell(tbl, 1, 0, "",                     text_color = color.white,  text_size = size.small)
+    table.cell(tbl, 0, 0, "FSZ — Alex Pantoja",  text_color = color.white, text_size = size.small)
+    table.cell(tbl, 1, 0, "",                     text_color = color.white, text_size = size.small)
 
     // Fractal
-    table.cell(tbl, 0, 1, "Fractal",        text_color = color.gray,  text_size = size.tiny)
     bool has_frac = not na(g_frac)
+    table.cell(tbl, 0, 1, "Fractal",        text_color = color.gray, text_size = size.tiny)
     table.cell(tbl, 1, 1, has_frac ? (g_frac.is_bullish ? "ALCISTA" : "BAJISTA") : "---", text_color = has_frac ? (g_frac.is_bullish ? color.lime : color.red) : color.gray, text_size = size.tiny)
 
     // Zona FIBO
-    table.cell(tbl, 0, 2, "Precio en zona", text_color = color.gray,   text_size = size.tiny)
+    table.cell(tbl, 0, 2, "Precio en zona", text_color = color.gray, text_size = size.tiny)
     table.cell(tbl, 1, 2, piz ? "DENTRO" : "FUERA", text_color = piz ? color.lime : color.gray, text_size = size.tiny)
 
-    // Nivel 50% / 61.8%
-    table.cell(tbl, 0, 3, "Zona 50%",       text_color = color.gray,   text_size = size.tiny)
-    table.cell(tbl, 1, 3, not na(g_fibo) ? str.tostring(g_fibo.level_50, "#.####")  : "---", text_color = color.yellow, text_size = size.tiny)
-    table.cell(tbl, 0, 4, "Zona 61.8%",     text_color = color.gray,   text_size = size.tiny)
+    table.cell(tbl, 0, 3, "Zona 50%",       text_color = color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 3, not na(g_fibo) ? str.tostring(g_fibo.level_50,  "#.####") : "---", text_color = color.yellow, text_size = size.tiny)
+    table.cell(tbl, 0, 4, "Zona 61.8%",     text_color = color.gray, text_size = size.tiny)
     table.cell(tbl, 1, 4, not na(g_fibo) ? str.tostring(g_fibo.level_618, "#.####") : "---", text_color = color.yellow, text_size = size.tiny)
 
     // Confluencias
-    table.cell(tbl, 0, 5, "Score Conf.",    text_color = color.gray,   text_size = size.tiny)
     bool has_conf = not na(g_conf)
     color sc = has_conf and g_conf.is_valid ? color.lime : color.orange
+    table.cell(tbl, 0, 5, "Score Conf.",    text_color = color.gray, text_size = size.tiny)
     table.cell(tbl, 1, 5, has_conf ? str.tostring(g_conf.score) + "/" + str.tostring(i_min_conf) : "---", text_color = sc, text_size = size.tiny)
-
-    table.cell(tbl, 0, 6, "Order Block",    text_color = color.gray,   text_size = size.tiny)
-    table.cell(tbl, 1, 6, has_conf and g_conf.ob_detected    ? "SI" : "-", text_color = has_conf and g_conf.ob_detected    ? color.lime : color.gray, text_size = size.tiny)
-    table.cell(tbl, 0, 7, "FVG",            text_color = color.gray,   text_size = size.tiny)
-    table.cell(tbl, 1, 7, has_conf and g_conf.fvg_detected   ? "SI" : "-", text_color = has_conf and g_conf.fvg_detected   ? color.lime : color.gray, text_size = size.tiny)
-    table.cell(tbl, 0, 8, "Pivot Zone",     text_color = color.gray,   text_size = size.tiny)
-    table.cell(tbl, 1, 8, has_conf and g_conf.pivot_detected ? "SI" : "-", text_color = has_conf and g_conf.pivot_detected ? color.lime : color.gray, text_size = size.tiny)
+    table.cell(tbl, 0, 6, "OB / FVG / PIV", text_color = color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 6, (has_conf and g_conf.ob_detected ? "OB " : "- ") + (has_conf and g_conf.fvg_detected ? "FVG " : "- ") + (has_conf and g_conf.pivot_detected ? "PIV" : "-"), text_color = sc, text_size = size.tiny)
 
     // CHoCH
-    table.cell(tbl, 0, 9, "CHoCH",          text_color = color.gray,   text_size = size.tiny)
-    table.cell(tbl, 1, 9, choch_found ? "DETECTADO" : wait_rej ? "esperando" : "---", text_color = choch_found ? color.lime : color.gray, text_size = size.tiny)
+    table.cell(tbl, 0, 7, "CHoCH",          text_color = color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 7, choch_found ? "DETECTADO" : wait_rej ? "esperando" : "---", text_color = choch_found ? color.lime : color.gray, text_size = size.tiny)
 
-    // Señal
-    table.cell(tbl, 0, 10, "Senal",         text_color = color.gray,   text_size = size.tiny)
-    color sig_col = g_setup.active ? color.white : (g_setup.tp2_hit ? color.lime : (g_setup.sl_hit ? color.red : color.gray))
-    table.cell(tbl, 1, 10, g_setup.active or g_setup.bar_entry > 0 ? g_setup.setup_status() : "---", text_color = sig_col, text_size = size.tiny)
+    // Trade activo
+    table.cell(tbl, 0, 8, "Trade",          text_color = color.gray, text_size = size.tiny)
+    color sig_col = g_setup.active ? color.white : (g_setup.tp2_hit ? color.lime : (g_setup.tp1_hit ? color.yellow : (g_setup.sl_hit ? color.red : color.gray)))
+    table.cell(tbl, 1, 8, g_setup.active or g_setup.bar_entry > 0 ? g_setup.setup_status() : "---", text_color = sig_col, text_size = size.tiny)
 
-    // Niveles activos
-    table.cell(tbl, 0, 11, "Entry",         text_color = color.gray,   text_size = size.tiny)
-    table.cell(tbl, 1, 11, g_setup.active ? str.tostring(g_setup.entry_price, "#.####") : "---", text_color = color.white, text_size = size.tiny)
-    table.cell(tbl, 0, 12, "Stop Loss",     text_color = color.gray,   text_size = size.tiny)
-    table.cell(tbl, 1, 12, g_setup.active ? str.tostring(g_setup.stop_loss,   "#.####") : "---", text_color = color.red,   text_size = size.tiny)
-    table.cell(tbl, 0, 13, "TP1 / TP2",    text_color = color.gray,   text_size = size.tiny)
-    table.cell(tbl, 1, 13, g_setup.active ? str.tostring(g_setup.tp1, "#.##") + " / " + str.tostring(g_setup.tp2, "#.##") : "---", text_color = color.lime, text_size = size.tiny)
+    table.cell(tbl, 0, 9, "Entry",          text_color = color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 9, g_setup.active ? str.tostring(g_setup.entry_price, "#.####") : "---", text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 0, 10, "SL",            text_color = color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 10, g_setup.active ? str.tostring(g_setup.stop_loss, "#.####") : "---", text_color = color.red, text_size = size.tiny)
+    table.cell(tbl, 0, 11, "TP1 / TP2",    text_color = color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 11, g_setup.active ? str.tostring(g_setup.tp1, "#.##") + " / " + str.tostring(g_setup.tp2, "#.##") : "---", text_color = color.lime, text_size = size.tiny)
+
+    // Separador de estadisticas
+    table.cell(tbl, 0, 12, "-- Historial --", text_color = color.new(color.yellow, 20), text_size = size.tiny)
+    table.cell(tbl, 1, 12, str.tostring(array.size(g_history)) + "/" + str.tostring(i_max_trades), text_color = color.new(color.yellow, 20), text_size = size.tiny)
+
+    int total_closed = g_wins + g_losses + g_be
+    float wr = total_closed > 0 ? g_wins / total_closed * 100.0 : 0.0
+    color wr_col = wr >= 50.0 ? color.lime : wr >= 35.0 ? color.orange : color.red
+
+    table.cell(tbl, 0, 13, "Wins / Losses",  text_color = color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 13, str.tostring(g_wins) + "W  " + str.tostring(g_losses) + "L  " + str.tostring(g_be) + "BE", text_color = color.white, text_size = size.tiny)
+
+    table.cell(tbl, 0, 14, "Win rate",       text_color = color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 14, str.tostring(wr, "#.#") + "%", text_color = wr_col, text_size = size.tiny)
+
+    table.cell(tbl, 0, 15, "Net RR",         text_color = color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 15, str.tostring(g_net_rr, "#.##") + "R", text_color = g_net_rr > 0 ? color.lime : color.red, text_size = size.tiny)
+
+    table.cell(tbl, 0, 16, "Ultimo",         text_color = color.gray, text_size = size.tiny)
+    color lr_col = g_last_result == "TP2" or g_last_result == "TP1+BE" ? color.lime : g_last_result == "SL" ? color.red : color.orange
+    table.cell(tbl, 1, 16, g_last_result == "" ? "---" : g_last_result, text_color = lr_col, text_size = size.tiny)
 
 // ═══════════════════════════════════════════════════════════════
 // ALERTAS
 // ═══════════════════════════════════════════════════════════════
-alertcondition(buy_sig,                              "FSZ — BUY",          "Fractal Smart Zonez: Senal COMPRA. Entry={{close}}")
-alertcondition(sell_sig,                             "FSZ — SELL",         "Fractal Smart Zonez: Senal VENTA. Entry={{close}}")
-alertcondition(piz and not na(g_conf) and g_conf.is_valid, "FSZ — Zona Valida",  "Zona con confluencias valida. Esperar CHoCH + rechazo.")
-alertcondition(choch_found and not wait_rej,         "FSZ — CHoCH",        "CHoCH detectado en zona valida. Esperar vela de rechazo.")
+alertcondition(buy_sig,                                    "FSZ — BUY",         "Fractal Smart Zonez: Senal COMPRA. Entry={{close}}")
+alertcondition(sell_sig,                                   "FSZ — SELL",        "Fractal Smart Zonez: Senal VENTA. Entry={{close}}")
+alertcondition(piz and not na(g_conf) and g_conf.is_valid, "FSZ — Zona Valida", "Zona con confluencias valida. Esperar CHoCH + rechazo.")
+alertcondition(choch_found and not wait_rej,               "FSZ — CHoCH",       "CHoCH detectado en zona valida. Esperar vela de rechazo.")
