@@ -46,7 +46,6 @@ bool i_show_ob      = input.bool(true,  "Mostrar Order Block",           group =
 bool i_show_fvg     = input.bool(true,  "Mostrar FVG / Imbalance",      group = "5  Visual")
 bool i_show_pivot   = input.bool(true,  "Mostrar Pivot Zone",            group = "5  Visual")
 bool i_show_sig     = input.bool(true,  "Mostrar Panel Trade activo",    group = "5  Visual")
-bool i_show_history = input.bool(true,  "Mostrar Historial de trades",   group = "5  Visual")
 bool i_show_table   = input.bool(true,  "Mostrar Tabla Estado",          group = "5  Visual")
 bool i_show_bg      = input.bool(true,  "Mostrar Fondo Zona",            group = "5  Visual")
 int  i_max_trades   = input.int(30,    "Max trades en historial",        minval = 5, maxval = 100, group = "5  Visual", tooltip = "Limite de trades historicos dibujados para no saturar el grafico")
@@ -366,13 +365,6 @@ var FSZ_SetupState g_setup = FSZ_SetupState.new(false, false, 0.0, 0.0, 0.0, 0.0
 // Historial de trades cerrados — persisten con borde fijo en closeBar
 var array<FSZ_SetupState> g_history = array.new<FSZ_SetupState>()
 
-// Estadisticas acumuladas
-var int   g_wins   = 0
-var int   g_losses = 0
-var int   g_be     = 0
-var float g_net_rr = 0.0
-var string g_last_result = ""
-
 var float pending_sh     = na
 var float pending_sl     = na
 var int   pending_sh_bar = na
@@ -445,30 +437,13 @@ bool just_closed = false
 if g_setup.active
     bool was_active = g_setup.active
     g_setup.setup_update()
-    // Acaba de cerrar esta barra
     if was_active and not g_setup.active
         just_closed := true
-        // Actualizar estadisticas
-        if g_setup.tp2_hit
-            g_wins     += 1
-            g_net_rr   += i_rr_tp1 * 0.5 + i_rr_tp2 * 0.5
-            g_last_result := "TP2"
-        else if g_setup.tp1_hit
-            g_wins     += 1
-            g_net_rr   += i_rr_tp1 * 0.5
-            g_last_result := "TP1+BE"
-        else if g_setup.sl_hit
-            g_losses   += 1
-            g_net_rr   -= 1.0
-            g_last_result := "SL"
-        else
-            g_be       += 1
-            g_last_result := "BE"
 
 // ── Paso 7: Archivar trade cerrado en historial ───────────────
 // Al cerrar: copia el estado al historial con borde fijo en bar_close.
 // Si supera el maximo configurado, borra el mas antiguo (erase + shift).
-if just_closed and i_show_history
+if just_closed
     // Clonar el setup cerrado en un nuevo objeto para el historial
     FSZ_SetupState archived = FSZ_SetupState.new(
          g_setup.active, g_setup.is_long,
@@ -555,7 +530,7 @@ if barstate.islast and not na(g_frac) and not na(g_fibo)
 // ═══════════════════════════════════════════════════════════════
 // TABLA DE ESTADO EN TIEMPO REAL
 // ═══════════════════════════════════════════════════════════════
-var table tbl = table.new(position.top_right, 2, 17, bgcolor = color.new(color.black, 80), border_color = color.new(color.gray, 45), border_width = 1)
+var table tbl = table.new(position.top_right, 2, 12, bgcolor = color.new(color.black, 80), border_color = color.new(color.gray, 45), border_width = 1)
 
 if barstate.islast and i_show_table
     // Encabezado
@@ -600,26 +575,6 @@ if barstate.islast and i_show_table
     table.cell(tbl, 0, 11, "TP1 / TP2",    text_color = color.gray, text_size = size.tiny)
     table.cell(tbl, 1, 11, g_setup.active ? str.tostring(g_setup.tp1, "#.##") + " / " + str.tostring(g_setup.tp2, "#.##") : "---", text_color = color.lime, text_size = size.tiny)
 
-    // Separador de estadisticas
-    table.cell(tbl, 0, 12, "-- Historial --", text_color = color.new(color.yellow, 20), text_size = size.tiny)
-    table.cell(tbl, 1, 12, str.tostring(array.size(g_history)) + "/" + str.tostring(i_max_trades), text_color = color.new(color.yellow, 20), text_size = size.tiny)
-
-    int total_closed = g_wins + g_losses + g_be
-    float wr = total_closed > 0 ? g_wins / total_closed * 100.0 : 0.0
-    color wr_col = wr >= 50.0 ? color.lime : wr >= 35.0 ? color.orange : color.red
-
-    table.cell(tbl, 0, 13, "Wins / Losses",  text_color = color.gray, text_size = size.tiny)
-    table.cell(tbl, 1, 13, str.tostring(g_wins) + "W  " + str.tostring(g_losses) + "L  " + str.tostring(g_be) + "BE", text_color = color.white, text_size = size.tiny)
-
-    table.cell(tbl, 0, 14, "Win rate",       text_color = color.gray, text_size = size.tiny)
-    table.cell(tbl, 1, 14, str.tostring(wr, "#.#") + "%", text_color = wr_col, text_size = size.tiny)
-
-    table.cell(tbl, 0, 15, "Net RR",         text_color = color.gray, text_size = size.tiny)
-    table.cell(tbl, 1, 15, str.tostring(g_net_rr, "#.##") + "R", text_color = g_net_rr > 0 ? color.lime : color.red, text_size = size.tiny)
-
-    table.cell(tbl, 0, 16, "Ultimo",         text_color = color.gray, text_size = size.tiny)
-    color lr_col = g_last_result == "TP2" or g_last_result == "TP1+BE" ? color.lime : g_last_result == "SL" ? color.red : color.orange
-    table.cell(tbl, 1, 16, g_last_result == "" ? "---" : g_last_result, text_color = lr_col, text_size = size.tiny)
 
 // ═══════════════════════════════════════════════════════════════
 // ALERTAS
