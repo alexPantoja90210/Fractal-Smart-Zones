@@ -1,10 +1,10 @@
 // ============================================================
-// FRACTAL SMART ZONEZ — by Vic-Forex
+// FRACTAL SMART ZONEZ — by Alex Pantoja
 // VERSION 5: STRATEGY COMPLETA para Backtest
 // Visualización completa: Fractal, FIBO, OB, FVG, Pivot Zones
 // ============================================================
 //@version=6
-strategy("FSZ v5 Backtest [Vic-Forex]", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 2, commission_type = strategy.commission.percent, commission_value = 0.07, slippage = 2, max_bars_back = 500, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 300)
+strategy("FSZ v5 Backtest [Alex Pantoja]", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 2, commission_type = strategy.commission.percent, commission_value = 0.07, slippage = 2, max_bars_back = 500, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 300)
 
 // ─── INPUTS ───────────────────────────────────────────────────
 int   i_lookback   = input.int(5,    "Lookback Fractal",     minval = 2, maxval = 10,   group = "1 Fractales")
@@ -366,6 +366,7 @@ if g_trade.in_trade
         else if high >= tr.tp1 and not tr.tp1_hit
             tr.tp1_hit      := true
             tr.be_triggered := true
+            tr.stop_loss    := tr.entry_price   // SL se mueve a BE (entry)
             strategy.exit("Long BE", "Long", stop = tr.entry_price, limit = tr.tp2, qty_percent = 50)
         else if low <= (tr.be_triggered ? tr.entry_price : tr.stop_loss)
             closed_be   := tr.be_triggered
@@ -379,6 +380,7 @@ if g_trade.in_trade
         else if low <= tr.tp1 and not tr.tp1_hit
             tr.tp1_hit      := true
             tr.be_triggered := true
+            tr.stop_loss    := tr.entry_price   // SL se mueve a BE (entry)
             strategy.exit("Short BE", "Short", stop = tr.entry_price, limit = tr.tp2, qty_percent = 50)
         else if high >= (tr.be_triggered ? tr.entry_price : tr.stop_loss)
             closed_be   := tr.be_triggered
@@ -458,11 +460,17 @@ if i_show_trade and g_trade.in_trade and barstate.islast
     int rb = bar_index + 40
     int lb = tr.bar_entry
     // Entry
+    color tr_risk_bg = tr.be_triggered ? color.new(color.orange, 92) : color.new(color.red, 92)
+    color tr_risk_bd = tr.be_triggered ? color.new(color.orange, 55) : color.new(color.red, 55)
+    box.new(lb, tr.entry_price, rb, tr.stop_loss, bgcolor = tr_risk_bg, border_color = tr_risk_bd, border_width = 1)
     line.new(lb, tr.entry_price, rb, tr.entry_price, color = color.white, width = 2)
     label.new(rb, tr.entry_price, "ENTRY  " + str.tostring(tr.entry_price, "#.####"), style = label.style_label_left, color = color.new(color.white, 50), textcolor = color.white, size = size.tiny)
     // Stop Loss
-    line.new(lb, tr.stop_loss, rb, tr.stop_loss, color = color.red, width = 2, style = line.style_dashed)
-    label.new(rb, tr.stop_loss, "SL  " + str.tostring(tr.stop_loss, "#.####"), style = label.style_label_left, color = color.new(color.red, 50), textcolor = color.red, size = size.tiny)
+    color tr_sl_col = tr.be_triggered ? color.orange : color.red
+    line.new(lb, tr.stop_loss, rb, tr.stop_loss, color = tr_sl_col, width = 2, style = line.style_dashed)
+    string tr_sl_txt = tr.be_triggered ? "BE  " + str.tostring(tr.stop_loss, "#.####") : "SL  " + str.tostring(tr.stop_loss, "#.####")
+    color  tr_sl_lc  = tr.be_triggered ? color.orange : color.red
+    label.new(rb, tr.stop_loss, tr_sl_txt, style = label.style_label_left, color = color.new(tr_sl_lc, 50), textcolor = tr_sl_lc, size = size.tiny)
     // TP1
     line.new(lb, tr.tp1, rb, tr.tp1, color = color.new(color.lime, 30), width = 1, style = line.style_dashed)
     label.new(rb, tr.tp1, "TP1 1:" + str.tostring(i_rr_tp1, "#.#") + "  " + str.tostring(tr.tp1, "#.####"), style = label.style_label_left, color = color.new(color.lime, 60), textcolor = color.lime, size = size.tiny)
