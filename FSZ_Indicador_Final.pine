@@ -373,9 +373,7 @@ bool new_signal = false
 if wait_rej and piz and not na(g_frac) and not g_setup.active
     bool bull = g_frac.is_bullish
     if f_rejection(bull, i_wick_rat)
-        float sl_ref = not na(g_conf) and g_conf.ob_detected ?
-                        (bull ? g_conf.ob_low : g_conf.ob_high) :
-                        (bull ? g_fibo.zone_bottom : g_fibo.zone_top)
+        float sl_ref = not na(g_conf) and g_conf.ob_detected ? (bull ? g_conf.ob_low : g_conf.ob_high) : (bull ? g_fibo.zone_bottom : g_fibo.zone_top)
         g_setup.setup_enter(bull, close, sl_ref, i_rr_tp1, i_rr_tp2)
         wait_rej   := false
         new_signal := true
@@ -396,9 +394,8 @@ plotshape(buy_sig,  "BUY",  shape.arrowup,   location.belowbar, color.new(color.
 plotshape(sell_sig, "SELL", shape.arrowdown,  location.abovebar, color.new(color.red,  0), size = size.normal)
 
 // ── Fondo de estado ───────────────────────────────────────────
-if i_show_bg
-    bgcolor(piz                 ? color.new(color.yellow, 93) : na, title = "En zona FIBO")
-    bgcolor(choch_found and piz ? color.new(color.green,  90) : na, title = "CHoCH activo")
+bgcolor(i_show_bg and piz                 ? color.new(color.yellow, 93) : na, title = "En zona FIBO")
+bgcolor(i_show_bg and choch_found and piz ? color.new(color.green,  90) : na, title = "CHoCH activo")
 
 // ═══════════════════════════════════════════════════════════════
 // VISUALIZACIÓN DE ZONAS (solo en última barra)
