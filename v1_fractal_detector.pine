@@ -11,7 +11,7 @@ int  i_lookback  = input.int(5,    "Lookback Fractal", minval = 2, maxval = 10, 
 bool i_show_frac = input.bool(true, "Mostrar Fractales",                          group = "Fractales")
 
 // ─── UDT: FRACTAL ─────────────────────────────────────────────
-type Fractal
+type FSZ_Fractal
     float swing_high
     float swing_low
     int   bar_high
@@ -19,25 +19,25 @@ type Fractal
     bool  is_bullish
     color box_color
 
-method frac_size(Fractal self) =>
+method frac_size(FSZ_Fractal self) =>
     self.swing_high - self.swing_low
 
-method price_inside(Fractal self, float price) =>
+method price_inside(FSZ_Fractal self, float price) =>
     price >= self.swing_low and price <= self.swing_high
 
 // ─── UDT: FRACTAL REGISTRY ────────────────────────────────────
-type FractalRegistry
-    array<Fractal> fractals
+type FSZ_Registry
+    array<FSZ_Fractal> fractals
     int            max_count
-    Fractal        last_fractal
+    FSZ_Fractal        last_fractal
 
-method reg_add(FractalRegistry self, Fractal f) =>
+method reg_add(FSZ_Registry self, FSZ_Fractal f) =>
     array.push(self.fractals, f)
     self.last_fractal := f
     if array.size(self.fractals) > self.max_count
         array.shift(self.fractals)
 
-method reg_get_last(FractalRegistry self) =>
+method reg_get_last(FSZ_Registry self) =>
     int sz = array.size(self.fractals)
     sz > 0 ? array.get(self.fractals, sz - 1) : na
 
@@ -57,7 +57,7 @@ f_is_swing_low(int lb) =>
     ok
 
 // ─── ESTADO GLOBAL ────────────────────────────────────────────
-var FractalRegistry registry = FractalRegistry.new(array.new<Fractal>(), 20, na)
+var FSZ_Registry registry = FSZ_Registry.new(array.new<FSZ_Fractal>(), 20, na)
 
 var float pending_sh     = na
 var float pending_sl     = na
@@ -79,7 +79,7 @@ if is_sl
 if not na(pending_sh) and not na(pending_sl)
     bool  bullish = pending_sl_bar < pending_sh_bar
     color col     = bullish ? color.new(color.blue, 80) : color.new(color.red, 80)
-    Fractal nf    = Fractal.new(pending_sh, pending_sl, pending_sh_bar, pending_sl_bar, bullish, col)
+    FSZ_Fractal nf    = FSZ_Fractal.new(pending_sh, pending_sl, pending_sh_bar, pending_sl_bar, bullish, col)
     registry.reg_add(nf)
     pending_sh     := na
     pending_sl     := na
@@ -90,7 +90,7 @@ if not na(pending_sh) and not na(pending_sl)
 plotshape(i_show_frac and is_sh, "Swing High", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.tiny)
 plotshape(i_show_frac and is_sl, "Swing Low",  shape.triangleup,   location.belowbar, color.new(color.blue, 0), size = size.tiny)
 
-Fractal last = registry.reg_get_last()
+FSZ_Fractal last = registry.reg_get_last()
 if not na(last) and i_show_frac
     int left_bar  = math.min(last.bar_high, last.bar_low)
     int right_bar = math.max(last.bar_high, last.bar_low)
@@ -106,7 +106,7 @@ if barstate.islast
     table.cell(tbl, 0, 1, "Detectados",            text_color = color.gray,  text_size = size.tiny)
     table.cell(tbl, 1, 1, str.tostring(array.size(registry.fractals)), text_color = color.lime, text_size = size.tiny)
 
-    Fractal l = registry.reg_get_last()
+    FSZ_Fractal l = registry.reg_get_last()
     if not na(l)
         table.cell(tbl, 0, 2, "Ultimo fractal", text_color = color.gray, text_size = size.tiny)
         table.cell(tbl, 1, 2, l.is_bullish ? "ALCISTA" : "BAJISTA", text_color = l.is_bullish ? color.lime : color.red, text_size = size.tiny)

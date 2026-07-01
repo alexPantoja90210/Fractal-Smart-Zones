@@ -1,0 +1,152 @@
+// ============================================================
+// FRACTAL SMART ZONEZ — by Vic-Forex
+// VERSION 2: Fractales + Zona Fibonacci (Zona Dorada 50-61.8%)
+// PREREQUISITO: v1 aprobada
+// ============================================================
+//@version=6
+indicator("FSZ v2 — Fibo Zone", overlay = true, max_boxes_count = 100, max_lines_count = 100, max_labels_count = 50)
+
+// ─── INPUTS ───────────────────────────────────────────────────
+int   i_lookback = input.int(5,    "Lookback Fractal", minval = 2, maxval = 10, group = "Fractales")
+bool  i_show_frac = input.bool(true, "Mostrar Fractales",  group = "Visual")
+bool  i_show_fibo = input.bool(true, "Mostrar Zona Dorada", group = "Visual")
+color i_col_bull  = input.color(color.new(color.blue,   75), "Color Alcista",     group = "Visual")
+color i_col_bear  = input.color(color.new(color.red,    75), "Color Bajista",     group = "Visual")
+color i_col_fibo  = input.color(color.new(color.yellow, 70), "Color Zona Dorada", group = "Visual")
+
+// ─── UDT: FRACTAL ─────────────────────────────────────────────
+type FSZ_Fractal
+    float swing_high
+    float swing_low
+    int   bar_high
+    int   bar_low
+    bool  is_bullish
+
+// ─── UDT: FIBO ZONE ───────────────────────────────────────────
+type FSZ_FiboZone
+    float level_382
+    float level_50
+    float level_618
+    float level_786
+    float zone_top
+    float zone_bottom
+    string direction
+    bool  price_in_zone
+
+method fz_calc(FSZ_FiboZone self, float sh, float sl, bool bull) =>
+    float r = sh - sl
+    if bull
+        self.level_382   := sh - r * 0.382
+        self.level_50    := sh - r * 0.500
+        self.level_618   := sh - r * 0.618
+        self.level_786   := sh - r * 0.786
+        self.zone_top    := self.level_50
+        self.zone_bottom := self.level_618
+        self.direction   := "bullish"
+    else
+        self.level_382   := sl + r * 0.382
+        self.level_50    := sl + r * 0.500
+        self.level_618   := sl + r * 0.618
+        self.level_786   := sl + r * 0.786
+        self.zone_top    := self.level_618
+        self.zone_bottom := self.level_50
+        self.direction   := "bearish"
+
+method fz_check(FSZ_FiboZone self, float price) =>
+    self.price_in_zone := price >= self.zone_bottom and price <= self.zone_top
+    self.price_in_zone
+
+method fz_size(FSZ_FiboZone self) =>
+    self.zone_top - self.zone_bottom
+
+// ─── FUNCIONES ────────────────────────────────────────────────
+f_is_sh(int lb) =>
+    bool ok = true
+    for i = 1 to lb
+        if high[lb] < high[lb - i] or high[lb] < high[lb + i]
+            ok := false
+    ok
+
+f_is_sl(int lb) =>
+    bool ok = true
+    for i = 1 to lb
+        if low[lb] > low[lb - i] or low[lb] > low[lb + i]
+            ok := false
+    ok
+
+// ─── ESTADO GLOBAL ────────────────────────────────────────────
+var FSZ_Fractal  g_frac = na
+var FSZ_FiboZone g_fibo = na
+
+var float pending_sh     = na
+var float pending_sl     = na
+var int   pending_sh_bar = na
+var int   pending_sl_bar = na
+
+// ─── LÓGICA BARRA A BARRA ─────────────────────────────────────
+bool is_sh = f_is_sh(i_lookback)
+bool is_sl = f_is_sl(i_lookback)
+
+if is_sh
+    pending_sh     := high[i_lookback]
+    pending_sh_bar := bar_index - i_lookback
+
+if is_sl
+    pending_sl     := low[i_lookback]
+    pending_sl_bar := bar_index - i_lookback
+
+if not na(pending_sh) and not na(pending_sl)
+    bool bull = pending_sl_bar < pending_sh_bar
+    g_frac := FSZ_Fractal.new(pending_sh, pending_sl, pending_sh_bar, pending_sl_bar, bull)
+    g_fibo := FSZ_FiboZone.new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "", false)
+    g_fibo.fz_calc(pending_sh, pending_sl, bull)
+    pending_sh     := na
+    pending_sl     := na
+    pending_sh_bar := na
+    pending_sl_bar := na
+
+bool price_in_zone = not na(g_fibo) ? g_fibo.fz_check(close) : false
+
+// ─── VISUALIZACIÓN ────────────────────────────────────────────
+plotshape(i_show_frac and is_sh, "SH", shape.triangledown, location.abovebar, color.new(color.red,  0), size = size.tiny)
+plotshape(i_show_frac and is_sl, "SL", shape.triangleup,   location.belowbar, color.new(color.blue, 0), size = size.tiny)
+bgcolor(price_in_zone ? color.new(color.yellow, 90) : na, title = "En Zona Dorada")
+
+if not na(g_frac) and not na(g_fibo) and barstate.islast
+    int lb = math.min(g_frac.bar_high, g_frac.bar_low)
+    int rb = bar_index + 20
+
+    if i_show_frac
+        box.new(lb, g_frac.swing_high, math.max(g_frac.bar_high, g_frac.bar_low), g_frac.swing_low, border_color = g_frac.is_bullish ? color.blue : color.red, bgcolor = g_frac.is_bullish ? i_col_bull : i_col_bear, border_width = 1)
+
+    if i_show_fibo
+        box.new(lb, g_fibo.zone_top, rb, g_fibo.zone_bottom, border_color = color.yellow, bgcolor = i_col_fibo, border_width = 2, border_style = line.style_dashed)
+        line.new(lb, g_fibo.level_382, rb, g_fibo.level_382, color = color.new(color.gray,   50), width = 1, style = line.style_dotted)
+        line.new(lb, g_fibo.level_50,  rb, g_fibo.level_50,  color = color.new(color.yellow, 20), width = 2)
+        line.new(lb, g_fibo.level_618, rb, g_fibo.level_618, color = color.new(color.yellow, 20), width = 2)
+        line.new(lb, g_fibo.level_786, rb, g_fibo.level_786, color = color.new(color.gray,   50), width = 1, style = line.style_dotted)
+        label.new(rb, g_fibo.level_50,  "50.0%",  style = label.style_label_left, color = color.new(color.yellow, 60), textcolor = color.yellow, size = size.tiny)
+        label.new(rb, g_fibo.level_618, "61.8%",  style = label.style_label_left, color = color.new(color.yellow, 60), textcolor = color.yellow, size = size.tiny)
+        label.new(rb, g_fibo.level_382, "38.2%",  style = label.style_label_left, color = color.new(color.gray,   70), textcolor = color.gray,   size = size.tiny)
+
+// ─── TABLA DE ESTADO ──────────────────────────────────────────
+var table tbl = table.new(position.top_right, 2, 7, bgcolor = color.new(color.black, 85), border_color = color.gray, border_width = 1)
+
+if barstate.islast
+    table.cell(tbl, 0, 0, "FSZ v2 Fibo Zone", text_color = color.white, text_size = size.small)
+    table.cell(tbl, 1, 0, "",                  text_color = color.white, text_size = size.small)
+
+    if not na(g_fibo)
+        color dir_col = g_fibo.direction == "bullish" ? color.lime : color.red
+        table.cell(tbl, 0, 1, "Direccion",    text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 1, str.upper(g_fibo.direction), text_color = dir_col, text_size = size.tiny)
+        table.cell(tbl, 0, 2, "Zona 50pct",  text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 2, str.tostring(g_fibo.level_50,  "#.####"), text_color = color.yellow, text_size = size.tiny)
+        table.cell(tbl, 0, 3, "Zona 61.8pct", text_color = color.gray,  text_size = size.tiny)
+        table.cell(tbl, 1, 3, str.tostring(g_fibo.level_618, "#.####"), text_color = color.yellow, text_size = size.tiny)
+        table.cell(tbl, 0, 4, "Precio zona", text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 4, price_in_zone ? "DENTRO" : "FUERA", text_color = price_in_zone ? color.lime : color.gray, text_size = size.tiny)
+        table.cell(tbl, 0, 5, "Zona size",   text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 5, str.tostring(g_fibo.fz_size(), "#.####"), text_color = color.white, text_size = size.tiny)
+        table.cell(tbl, 0, 6, "Direccion",   text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 6, not na(g_frac) ? (g_frac.is_bullish ? "ALCISTA" : "BAJISTA") : "---", text_color = color.white, text_size = size.tiny)
