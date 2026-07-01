@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════╗
 // ║   FRACTAL SMART ZONEZ — Indicador Final                     ║
-// ║   by Vic-Forex                                              ║
+// ║   by Alex Pantoja                                              ║
 // ║   Pine Script v6                                            ║
 // ║                                                             ║
 // ║   Elementos:                                                ║
@@ -16,7 +16,7 @@
 // ║   • Alertas configurables                                   ║
 // ╚══════════════════════════════════════════════════════════════╝
 //@version=6
-indicator("Fractal Smart Zonez [Vic-Forex]", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 300)
+indicator("Fractal Smart Zonez [Alex Pantoja]", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 300)
 
 // ═══════════════════════════════════════════════════════════════
 // INPUTS
@@ -125,32 +125,76 @@ method conf_update(FSZ_Confluence self, int min_s) =>
     self.is_valid := self.score >= min_s
 
 // ── FSZ_SetupState ────────────────────────────────────────────
-// Gestiona la señal activa y sus niveles de precio
+// Gestiona la señal activa y sus niveles de precio.
+// Los objetos visuales viven DENTRO del UDT (estilo Gold System):
+// se borran y recrean en cada barra → panel siempre al día.
 type FSZ_SetupState
-    bool   active          // Señal activa esperando o en curso
+    bool   active
     bool   is_long
     float  entry_price
     float  stop_loss
     float  tp1
     float  tp2
     int    bar_entry
-    bool   be_triggered    // Break-even activado (TP1 alcanzado)
+    bool   be_triggered
     bool   tp1_hit
     bool   tp2_hit
     bool   sl_hit
+    // Objetos visuales del panel (persistentes, estilo Gold System)
+    line   ln_entry
+    line   ln_sl
+    line   ln_tp1
+    line   ln_tp2
+    box    bx_risk
+    box    bx_rew
+    label  lb_info
+
+method setup_erase(FSZ_SetupState self) =>
+    line.delete(self.ln_entry)
+    line.delete(self.ln_sl)
+    line.delete(self.ln_tp1)
+    line.delete(self.ln_tp2)
+    box.delete(self.bx_risk)
+    box.delete(self.bx_rew)
+    label.delete(self.lb_info)
 
 method setup_reset(FSZ_SetupState self) =>
-    self.active      := false
-    self.is_long     := false
-    self.entry_price := 0.0
-    self.stop_loss   := 0.0
-    self.tp1         := 0.0
-    self.tp2         := 0.0
-    self.bar_entry   := 0
+    self.setup_erase()
+    self.active       := false
+    self.is_long      := false
+    self.entry_price  := 0.0
+    self.stop_loss    := 0.0
+    self.tp1          := 0.0
+    self.tp2          := 0.0
+    self.bar_entry    := 0
     self.be_triggered := false
-    self.tp1_hit     := false
-    self.tp2_hit     := false
-    self.sl_hit      := false
+    self.tp1_hit      := false
+    self.tp2_hit      := false
+    self.sl_hit       := false
+
+// method: dibujar/actualizar el panel visual (estilo Gold System).
+// Borra objetos anteriores y los recrea — siempre actualizado.
+method setup_draw(FSZ_SetupState self, int right_bar, color col_bull, color col_bear, float rr1, float rr2) =>
+    self.setup_erase()
+    color tcol = self.is_long ? col_bull : col_bear
+    int   L    = self.bar_entry
+    int   R    = right_bar
+    // Líneas de niveles
+    self.ln_entry := line.new(L, self.entry_price, R, self.entry_price, color = color.new(color.gray, 0),  width = 2)
+    self.ln_sl    := line.new(L, self.stop_loss,   R, self.stop_loss,   color = color.new(col_bear,  0),   width = 2)
+    self.ln_tp1   := line.new(L, self.tp1,         R, self.tp1,         color = color.new(col_bull,  0),   width = 1, style = line.style_dashed)
+    self.ln_tp2   := line.new(L, self.tp2,         R, self.tp2,         color = color.new(col_bull,  0),   width = 2)
+    // Caja de riesgo (entry → SL) y recompensa (entry → TP2)
+    self.bx_risk  := box.new(L, self.entry_price, R, self.stop_loss,   bgcolor = color.new(col_bear, 88), border_color = color.new(col_bear, 55), border_width = 1)
+    self.bx_rew   := box.new(L, self.entry_price, R, self.tp2,         bgcolor = color.new(col_bull, 91), border_color = color.new(col_bull, 55), border_width = 1)
+    // Label de información completa
+    string be_txt  = self.be_triggered ? "  [BE]" : ""
+    string res_txt = self.sl_hit ? "  → SL" : self.tp2_hit ? "  → TP2" : self.tp1_hit ? "  → TP1" : ""
+    string dir_txt = self.is_long ? "▲ BUY" : "▼ SELL"
+    string info    = dir_txt + be_txt + res_txt + "\nEntry: " + str.tostring(self.entry_price, "#.####") + "\nSL:    " + str.tostring(self.stop_loss, "#.####") + "\nTP1:   " + str.tostring(self.tp1, "#.####") + "  (1:" + str.tostring(rr1, "#.#") + ")\nTP2:   " + str.tostring(self.tp2, "#.####") + "  (1:" + str.tostring(rr2, "#.#") + ")"
+    string ls = self.is_long ? label.style_label_up : label.style_label_down
+    float lb_price = self.is_long ? self.stop_loss : self.tp2
+    self.lb_info  := label.new(L, lb_price, info, style = ls, color = color.new(tcol, 12), textcolor = color.white, size = size.small)
 
 method setup_enter(FSZ_SetupState self, bool long, float entry, float sl_ref, float rr1, float rr2) =>
     self.active      := true
@@ -311,7 +355,7 @@ f_rejection(bool long, float wr) =>
 var FSZ_Fractal    g_frac  = na
 var FSZ_FiboZone   g_fibo  = na
 var FSZ_Confluence g_conf  = na
-var FSZ_SetupState g_setup = FSZ_SetupState.new(false, false, 0.0, 0.0, 0.0, 0.0, 0, false, false, false, false)
+var FSZ_SetupState g_setup = FSZ_SetupState.new(false, false, 0.0, 0.0, 0.0, 0.0, 0, false, false, false, false, na, na, na, na, na, na, na)
 
 var float pending_sh     = na
 var float pending_sl     = na
@@ -444,24 +488,11 @@ if barstate.islast and not na(g_frac) and not na(g_fibo)
             box.new(frac_l, g_conf.pivot_high, zone_r, g_conf.pivot_low, border_color = color.new(color.aqua, 15), bgcolor = c_pivot, border_width = 1, border_style = line.style_dashed)
         label.new(zone_r, g_conf.pivot_high, "PIV  " + str.tostring(g_conf.pivot_high, "#.####"), style = label.style_label_left, color = color.new(color.aqua, 35), textcolor = color.white, size = size.tiny)
 
-// ── 6. SEÑAL ACTIVA: ENTRY · SL · TP1 · TP2 · BE ────────────
-if i_show_sig and g_setup.active and barstate.islast
-    int rb = bar_index + 45
-    int lb = g_setup.bar_entry
-    // Líneas
-    line.new(lb, g_setup.entry_price, rb, g_setup.entry_price, color = color.white,               width = 2)
-    line.new(lb, g_setup.stop_loss,   rb, g_setup.stop_loss,   color = color.red,                 width = 2, style = line.style_dashed)
-    line.new(lb, g_setup.tp1,         rb, g_setup.tp1,         color = color.new(color.lime, 35), width = 1, style = line.style_dashed)
-    line.new(lb, g_setup.tp2,         rb, g_setup.tp2,         color = color.lime,                width = 2)
-    // Labels con precio
-    label.new(rb, g_setup.entry_price, "ENTRY  " + str.tostring(g_setup.entry_price, "#.####"),                        style = label.style_label_left, color = color.new(color.white,  45), textcolor = color.white,  size = size.tiny)
-    label.new(rb, g_setup.stop_loss,   "SL  "    + str.tostring(g_setup.stop_loss,   "#.####"),                        style = label.style_label_left, color = color.new(color.red,    45), textcolor = color.red,    size = size.tiny)
-    label.new(rb, g_setup.tp1,         "TP1 1:"  + str.tostring(i_rr_tp1, "#.#") + "   " + str.tostring(g_setup.tp1, "#.####"), style = label.style_label_left, color = color.new(color.lime, 60), textcolor = color.lime, size = size.tiny)
-    label.new(rb, g_setup.tp2,         "TP2 1:"  + str.tostring(i_rr_tp2, "#.#") + "   " + str.tostring(g_setup.tp2, "#.####"), style = label.style_label_left, color = color.new(color.lime, 35), textcolor = color.lime, size = size.tiny)
-    // Break-even activo
-    if g_setup.be_triggered
-        line.new(lb, g_setup.entry_price, rb, g_setup.entry_price, color = color.new(color.orange, 15), width = 1, style = line.style_dotted)
-        label.new(rb + 3, g_setup.entry_price, "BE", style = label.style_label_left, color = color.new(color.orange, 45), textcolor = color.orange, size = size.tiny)
+// ── 6. PANEL DEL TRADE (estilo Gold System — OOP persistente) ───────────
+// El panel se redibuja en cada barra extendiendo el borde derecho.
+// Los objetos viven dentro del UDT: borra los anteriores y recrea.
+if i_show_sig and g_setup.active
+    g_setup.setup_draw(bar_index + 45, c_bull, c_bear, i_rr_tp1, i_rr_tp2)
 
 // ═══════════════════════════════════════════════════════════════
 // TABLA DE ESTADO EN TIEMPO REAL
