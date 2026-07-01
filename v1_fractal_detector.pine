@@ -2,116 +2,72 @@
 // FRACTAL SMART ZONEZ — by Vic-Forex
 // VERSION 1: Detección de Fractales + Estructura Base UDT
 // OBJETIVO: Verificar que los fractales se detectan correctamente
-// TEST: Visualizar swing highs y swing lows en gráfico
 // ============================================================
-//@version=5
-indicator("FSZ v1 — Fractal Detector", overlay=true, max_boxes_count=50, max_lines_count=50)
+//@version=6
+indicator("FSZ v1 — Fractal Detector", overlay = true, max_boxes_count = 50, max_lines_count = 50)
 
-// ─────────────────────────────────────────────────────────────
-// INPUTS
-// ─────────────────────────────────────────────────────────────
-i_lookback  = input.int(5,  "Lookback Fractal", minval=2, maxval=10, group="Fractales")
-i_show_frac = input.bool(true, "Mostrar Fractales",                   group="Fractales")
+// ─── INPUTS ───────────────────────────────────────────────────
+int  i_lookback  = input.int(5,    "Lookback Fractal", minval = 2, maxval = 10, group = "Fractales")
+bool i_show_frac = input.bool(true, "Mostrar Fractales",                          group = "Fractales")
 
-// ─────────────────────────────────────────────────────────────
-// UDT: FRACTAL
-// Representa un fractal (impulso + retroceso) del mercado.
-// Un fractal es el bloque constructor de toda la estrategia.
-// ─────────────────────────────────────────────────────────────
+// ─── UDT: FRACTAL ─────────────────────────────────────────────
 type Fractal
-    float swing_high        // Precio del swing high
-    float swing_low         // Precio del swing low
-    int   bar_high          // Barra donde ocurrió el SH
-    int   bar_low           // Barra donde ocurrió el SL
-    bool  is_bullish        // true = estructura alcista
-    bool  is_confirmed      // true = fractal confirmado (price broke)
-    color box_color         // Color para visualización
+    float swing_high
+    float swing_low
+    int   bar_high
+    int   bar_low
+    bool  is_bullish
+    color box_color
 
-// ─────────────────────────────────────────────────────────────
-// MÉTODOS del tipo Fractal
-// ─────────────────────────────────────────────────────────────
-
-// Calcula el tamaño del fractal en puntos
-method size(Fractal self) =>
+method frac_size(Fractal self) =>
     self.swing_high - self.swing_low
 
-// Verifica si el precio actual está dentro del rango fractal
 method price_inside(Fractal self, float price) =>
     price >= self.swing_low and price <= self.swing_high
 
-// Descripción legible del fractal
-method to_string(Fractal self) =>
-    dir = self.is_bullish ? "ALCISTA" : "BAJISTA"
-    str.format("{0} | H:{1} L:{2}", dir,
-               str.tostring(self.swing_high, "#.##"),
-               str.tostring(self.swing_low, "#.##"))
-
-// ─────────────────────────────────────────────────────────────
-// UDT: FRACTAL REGISTRY
-// Almacena el historial de fractales detectados
-// ─────────────────────────────────────────────────────────────
+// ─── UDT: FRACTAL REGISTRY ────────────────────────────────────
 type FractalRegistry
-    array<Fractal> fractals     // Lista de todos los fractales
-    int            max_count    // Máximo de fractales a guardar
-    Fractal        last_fractal // Último fractal completo
+    array<Fractal> fractals
+    int            max_count
+    Fractal        last_fractal
 
-// Método: agregar fractal al registro
-method add(FractalRegistry self, Fractal f) =>
+method reg_add(FractalRegistry self, Fractal f) =>
     array.push(self.fractals, f)
     self.last_fractal := f
-    // Limitar tamaño del array
     if array.size(self.fractals) > self.max_count
         array.shift(self.fractals)
 
-// Método: retorna el fractal más reciente
-method get_last(FractalRegistry self) =>
-    size = array.size(self.fractals)
-    size > 0 ? array.get(self.fractals, size - 1) : na
+method reg_get_last(FractalRegistry self) =>
+    int sz = array.size(self.fractals)
+    sz > 0 ? array.get(self.fractals, sz - 1) : na
 
-// ─────────────────────────────────────────────────────────────
-// LÓGICA DE DETECCIÓN DE FRACTALES
-// Un swing high clásico: vela[n] es el máximo de las últimas
-// y siguientes n velas. Se confirma con lookback de barras.
-// ─────────────────────────────────────────────────────────────
-
-// Detecta swing high (máximo local)
+// ─── FUNCIONES DE DETECCIÓN ───────────────────────────────────
 f_is_swing_high(int lb) =>
-    is_sh = true
+    bool ok = true
     for i = 1 to lb
         if high[lb] < high[lb - i] or high[lb] < high[lb + i]
-            is_sh := false
-    is_sh
+            ok := false
+    ok
 
-// Detecta swing low (mínimo local)
 f_is_swing_low(int lb) =>
-    is_sl = true
+    bool ok = true
     for i = 1 to lb
         if low[lb] > low[lb - i] or low[lb] > low[lb + i]
-            is_sl := false
-    is_sl
+            ok := false
+    ok
 
-// ─────────────────────────────────────────────────────────────
-// ESTADO GLOBAL
-// ─────────────────────────────────────────────────────────────
-var FractalRegistry registry = FractalRegistry.new(
-     fractals  = array.new<Fractal>(),
-     max_count = 20,
-     last_fractal = na
-     )
+// ─── ESTADO GLOBAL ────────────────────────────────────────────
+var FractalRegistry registry = FractalRegistry.new(array.new<Fractal>(), 20, na)
 
-// Variables de seguimiento de swings pendientes
-var float pending_sh = na
-var float pending_sl = na
+var float pending_sh     = na
+var float pending_sl     = na
 var int   pending_sh_bar = na
 var int   pending_sl_bar = na
 
-// ─────────────────────────────────────────────────────────────
-// DETECCIÓN EN TIEMPO REAL
-// ─────────────────────────────────────────────────────────────
-is_sh = f_is_swing_high(i_lookback)
-is_sl = f_is_swing_low(i_lookback)
+// ─── DETECCIÓN ────────────────────────────────────────────────
+bool is_sh = f_is_swing_high(i_lookback)
+bool is_sl = f_is_swing_low(i_lookback)
 
-// Registrar swings detectados
 if is_sh
     pending_sh     := high[i_lookback]
     pending_sh_bar := bar_index - i_lookback
@@ -120,101 +76,41 @@ if is_sl
     pending_sl     := low[i_lookback]
     pending_sl_bar := bar_index - i_lookback
 
-// Cuando tenemos tanto SH como SL pendientes, construir fractal
 if not na(pending_sh) and not na(pending_sl)
-    bullish = pending_sl_bar < pending_sh_bar  // SL vino antes → impulso alcista
-    col     = bullish ? color.new(color.blue, 80) : color.new(color.red, 80)
-
-    new_fractal = Fractal.new(
-         swing_high   = pending_sh,
-         swing_low    = pending_sl,
-         bar_high     = pending_sh_bar,
-         bar_low      = pending_sl_bar,
-         is_bullish   = bullish,
-         is_confirmed = true,
-         box_color    = col
-         )
-
-    registry.add(new_fractal)
-
-    // Reset pending
+    bool  bullish = pending_sl_bar < pending_sh_bar
+    color col     = bullish ? color.new(color.blue, 80) : color.new(color.red, 80)
+    Fractal nf    = Fractal.new(pending_sh, pending_sl, pending_sh_bar, pending_sl_bar, bullish, col)
+    registry.reg_add(nf)
     pending_sh     := na
     pending_sl     := na
     pending_sh_bar := na
     pending_sl_bar := na
 
-// ─────────────────────────────────────────────────────────────
-// VISUALIZACIÓN
-// ─────────────────────────────────────────────────────────────
-// Marcadores de swing high y low
-plotshape(i_show_frac and is_sh, "Swing High",
-          shape.triangledown, location.abovebar,
-          color.new(color.red, 0), size=size.tiny)
+// ─── VISUALIZACIÓN ────────────────────────────────────────────
+plotshape(i_show_frac and is_sh, "Swing High", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.tiny)
+plotshape(i_show_frac and is_sl, "Swing Low",  shape.triangleup,   location.belowbar, color.new(color.blue, 0), size = size.tiny)
 
-plotshape(i_show_frac and is_sl, "Swing Low",
-          shape.triangleup, location.belowbar,
-          color.new(color.blue, 0), size=size.tiny)
-
-// Mostrar el último fractal como cuadro rectangular
-last = registry.get_last()
+Fractal last = registry.reg_get_last()
 if not na(last) and i_show_frac
-    // Solo dibujar si el fractal es reciente (últimas 100 barras)
-    left_bar  = math.min(last.bar_high, last.bar_low)
-    right_bar = math.max(last.bar_high, last.bar_low)
-
+    int left_bar  = math.min(last.bar_high, last.bar_low)
+    int right_bar = math.max(last.bar_high, last.bar_low)
     if bar_index - left_bar < 100
-        box.new(
-             left        = left_bar,
-             top         = last.swing_high,
-             right       = right_bar,
-             bottom      = last.swing_low,
-             bgcolor     = last.box_color,
-             border_color = last.is_bullish ? color.blue : color.red,
-             border_width = 1
-             )
+        box.new(left_bar, last.swing_high, right_bar, last.swing_low, border_color = last.is_bullish ? color.blue : color.red, bgcolor = last.box_color, border_width = 1)
 
-// ─────────────────────────────────────────────────────────────
-// TABLA DE ESTADO (para verificar que todo funciona)
-// ─────────────────────────────────────────────────────────────
-var table tbl = table.new(position.top_right, 2, 5,
-                            bgcolor      = color.new(color.black, 85),
-                            border_color = color.gray,
-                            border_width = 1)
+// ─── TABLA DE ESTADO ──────────────────────────────────────────
+var table tbl = table.new(position.top_right, 2, 5, bgcolor = color.new(color.black, 85), border_color = color.gray, border_width = 1)
 
 if barstate.islast
-    table.cell(tbl, 0, 0, "FSZ v1 — Fractales",
-                text_color=color.white, text_size=size.small)
-    table.cell(tbl, 1, 0, "", text_color=color.white)
+    table.cell(tbl, 0, 0, "FSZ v1 Fractales",     text_color = color.white, text_size = size.small)
+    table.cell(tbl, 1, 0, "",                      text_color = color.white, text_size = size.small)
+    table.cell(tbl, 0, 1, "Detectados",            text_color = color.gray,  text_size = size.tiny)
+    table.cell(tbl, 1, 1, str.tostring(array.size(registry.fractals)), text_color = color.lime, text_size = size.tiny)
 
-    n_frac = array.size(registry.fractals)
-    table.cell(tbl, 0, 1, "Fractales detectados",
-                text_color=color.gray, text_size=size.tiny)
-    table.cell(tbl, 1, 1, str.tostring(n_frac),
-                text_color=color.lime, text_size=size.tiny)
-
-    l = registry.get_last()
+    Fractal l = registry.reg_get_last()
     if not na(l)
-        table.cell(tbl, 0, 2, "Último fractal",
-                    text_color=color.gray, text_size=size.tiny)
-        table.cell(tbl, 1, 2, l.is_bullish ? "ALCISTA 📈" : "BAJISTA 📉",
-                    text_color=l.is_bullish ? color.lime : color.red,
-                    text_size=size.tiny)
-
-        table.cell(tbl, 0, 3, "Swing High",
-                    text_color=color.gray, text_size=size.tiny)
-        table.cell(tbl, 1, 3, str.tostring(l.swing_high, "#.##"),
-                    text_color=color.red, text_size=size.tiny)
-
-        table.cell(tbl, 0, 4, "Swing Low",
-                    text_color=color.gray, text_size=size.tiny)
-        table.cell(tbl, 1, 4, str.tostring(l.swing_low, "#.##"),
-                    text_color=color.blue, text_size=size.tiny)
-
-// ─────────────────────────────────────────────────────────────
-// QUÉ VERIFICAR EN ESTA VERSIÓN:
-// 1. Los triángulos aparecen en los puntos correctos del gráfico
-// 2. Los cuadros rectangulares representan impulsos reales
-// 3. La tabla muestra fractales detectados (> 0)
-// 4. Los colores: azul = alcista, rojo = bajista
-// 5. Probar en: XAUUSD 30m, EURUSD 1H, GBPUSD 4H
-// ─────────────────────────────────────────────────────────────
+        table.cell(tbl, 0, 2, "Ultimo fractal", text_color = color.gray, text_size = size.tiny)
+        table.cell(tbl, 1, 2, l.is_bullish ? "ALCISTA" : "BAJISTA", text_color = l.is_bullish ? color.lime : color.red, text_size = size.tiny)
+        table.cell(tbl, 0, 3, "Swing High",    text_color = color.gray, text_size = size.tiny)
+        table.cell(tbl, 1, 3, str.tostring(l.swing_high, "#.####"), text_color = color.red, text_size = size.tiny)
+        table.cell(tbl, 0, 4, "Swing Low",     text_color = color.gray, text_size = size.tiny)
+        table.cell(tbl, 1, 4, str.tostring(l.swing_low, "#.####"),  text_color = color.blue, text_size = size.tiny)
