@@ -1,0 +1,348 @@
+// ============================================================
+// FRACTAL SMART ZONEZ — by Vic-Forex
+// VERSION 4: CHoCH + Vela de Rechazo + Señal de Entrada
+// PREREQUISITO: v3 aprobada
+// ============================================================
+//@version=6
+indicator("FSZ v4 — Senal Entrada", overlay = true, max_boxes_count = 200, max_lines_count = 200, max_labels_count = 200)
+
+// ─── INPUTS ───────────────────────────────────────────────────
+int   i_lookback  = input.int(5,    "Lookback Fractal",    minval = 2, maxval = 10, group = "Fractales")
+int   i_ob_lb     = input.int(3,    "Lookback OB",         minval = 1, maxval = 10, group = "Confluencias")
+float i_fvg_min   = input.float(0.0,"FVG min",                                       group = "Confluencias")
+int   i_min_conf  = input.int(2,    "Confluencias min",    minval = 1, maxval = 4,  group = "Confluencias")
+float i_wick_rat  = input.float(0.6,"Ratio mecha rechazo", minval = 0.3, maxval = 0.9, group = "Confirmacion")
+float i_rr_tp1    = input.float(2.0,"RR TP1",              minval = 1.0, step = 0.5, group = "Gestion")
+float i_rr_tp2    = input.float(4.0,"RR TP2",              minval = 2.0, step = 0.5, group = "Gestion")
+bool  i_show_zones = input.bool(true, "Mostrar Zonas",                                group = "Visual")
+
+// ─── UDTs ─────────────────────────────────────────────────────
+type FSZ_Fractal
+    float swing_high
+    float swing_low
+    int   bar_high
+    int   bar_low
+    bool  is_bullish
+
+type FSZ_FiboZone
+    float zone_top
+    float zone_bottom
+    float level_50
+    float level_618
+    string direction
+    bool  price_in_zone
+
+method fz_calc(FSZ_FiboZone self, float sh, float sl, bool bull) =>
+    float r = sh - sl
+    if bull
+        self.level_50    := sh - r * 0.500
+        self.level_618   := sh - r * 0.618
+        self.zone_top    := self.level_50
+        self.zone_bottom := self.level_618
+        self.direction   := "bullish"
+    else
+        self.level_50    := sl + r * 0.500
+        self.level_618   := sl + r * 0.618
+        self.zone_top    := self.level_618
+        self.zone_bottom := self.level_50
+        self.direction   := "bearish"
+
+method fz_check(FSZ_FiboZone self, float price) =>
+    self.price_in_zone := price >= self.zone_bottom and price <= self.zone_top
+    self.price_in_zone
+
+type FSZ_Confluence
+    bool  ob_detected
+    bool  fvg_detected
+    bool  pivot_detected
+    float ob_high
+    float ob_low
+    int   score
+    bool  is_valid
+
+method conf_update(FSZ_Confluence self, int min_s) =>
+    self.score    := (self.ob_detected    ? 1 : 0)
+                   + (self.fvg_detected   ? 1 : 0)
+                   + (self.pivot_detected ? 1 : 0)
+    self.is_valid := self.score >= min_s
+
+type FSZ_Signal
+    bool   is_long
+    float  entry_price
+    float  stop_loss
+    float  tp1
+    float  tp2
+    float  risk_pts
+    int    bar_entry
+    string candle_type
+    bool   active
+    bool   be_triggered
+    bool   tp1_hit
+    bool   tp2_hit
+    bool   sl_hit
+
+method sig_calc(FSZ_Signal self, float entry, float sl_ref, bool long, float rr1, float rr2, string ct) =>
+    self.entry_price := entry
+    self.is_long     := long
+    self.candle_type := ct
+    self.bar_entry   := bar_index
+    self.active      := true
+    float risk       = math.abs(entry - sl_ref)
+    self.risk_pts    := risk
+    self.stop_loss   := long ? sl_ref - risk * 0.05 : sl_ref + risk * 0.05
+    self.tp1         := long ? entry + risk * rr1   : entry - risk * rr1
+    self.tp2         := long ? entry + risk * rr2   : entry - risk * rr2
+
+method sig_update(FSZ_Signal self) =>
+    if self.active
+        if self.is_long
+            if high >= self.tp2 and not self.tp2_hit
+                self.tp2_hit := true
+                self.active  := false
+            else if high >= self.tp1 and not self.tp1_hit
+                self.tp1_hit      := true
+                self.be_triggered := true
+            else if low <= (self.be_triggered ? self.entry_price : self.stop_loss)
+                self.sl_hit := not self.be_triggered
+                self.active := false
+        else
+            if low <= self.tp2 and not self.tp2_hit
+                self.tp2_hit := true
+                self.active  := false
+            else if low <= self.tp1 and not self.tp1_hit
+                self.tp1_hit      := true
+                self.be_triggered := true
+            else if high >= (self.be_triggered ? self.entry_price : self.stop_loss)
+                self.sl_hit := not self.be_triggered
+                self.active := false
+
+method sig_status(FSZ_Signal self) =>
+    not self.active ? (self.tp2_hit ? "TP2 OK" : self.tp1_hit ? "TP1+BE" : self.sl_hit ? "SL" : "BE") : (self.be_triggered ? "BE activo" : "En curso")
+
+// ─── FUNCIONES ────────────────────────────────────────────────
+f_is_sh(int lb) =>
+    bool ok = true
+    for i = 1 to lb
+        if high[lb] < high[lb - i] or high[lb] < high[lb + i]
+            ok := false
+    ok
+
+f_is_sl(int lb) =>
+    bool ok = true
+    for i = 1 to lb
+        if low[lb] > low[lb - i] or low[lb] > low[lb + i]
+            ok := false
+    ok
+
+f_ob(float zt, float zb, int lb, bool bull) =>
+    bool  found = false
+    float oh    = 0.0
+    float ol    = 0.0
+    for i = 1 to lb * 3
+        bool ov = high[i] >= zb and low[i] <= zt
+        if bull and close[i] < open[i] and ov and not found
+            found := true
+            oh    := high[i]
+            ol    := low[i]
+        if not bull and close[i] > open[i] and ov and not found
+            found := true
+            oh    := high[i]
+            ol    := low[i]
+    [found, oh, ol]
+
+f_fvg(float zt, float zb) =>
+    bool  found = false
+    float fh    = 0.0
+    float fl    = 0.0
+    for i = 1 to 20
+        if low[i - 1] > high[i + 1] and low[i - 1] >= zb and high[i + 1] <= zt and not found
+            found := true
+            fh    := low[i - 1]
+            fl    := high[i + 1]
+    [found, fh, fl]
+
+f_pivot(float zt, float zb) =>
+    bool  found = false
+    float lvl   = 0.0
+    for i = 20 to 150
+        if high[i] >= zb and high[i] <= zt and not found
+            found := true
+            lvl   := high[i]
+        if low[i] >= zb and low[i] <= zt and not found
+            found := true
+            lvl   := low[i]
+    [found, lvl]
+
+f_choch(bool bull, float zt, float zb) =>
+    bool  found = false
+    float lvl   = 0.0
+    if bull
+        float ph3 = ta.highest(high, 3)[1]
+        if close > ph3 and low[1] >= zb
+            found := true
+            lvl   := ph3
+    else
+        float pl3 = ta.lowest(low, 3)[1]
+        if close < pl3 and high[1] <= zt
+            found := true
+            lvl   := pl3
+    [found, lvl]
+
+f_rejection(bool long, float wr) =>
+    float body = math.abs(close - open)
+    float rng  = high - low
+    float dw   = math.min(close, open) - low
+    float uw   = high - math.max(close, open)
+    bool  found = false
+    string rtype = ""
+    if long
+        if dw > rng * wr and body < rng * 0.35
+            found := true
+            rtype := "pin_bar"
+        else if close > open and close > high[1] and open < low[1]
+            found := true
+            rtype := "engulfing"
+        else if dw > body * 2
+            found := true
+            rtype := "wick_rej"
+    else
+        if uw > rng * wr and body < rng * 0.35
+            found := true
+            rtype := "pin_bar"
+        else if close < open and close < low[1] and open > high[1]
+            found := true
+            rtype := "engulfing"
+        else if uw > body * 2
+            found := true
+            rtype := "wick_rej"
+    [found, rtype]
+
+// ─── ESTADO GLOBAL ────────────────────────────────────────────
+var FSZ_Fractal    g_frac   = na
+var FSZ_FiboZone   g_fibo   = na
+var FSZ_Confluence g_conf   = na
+var FSZ_Signal     g_signal = na
+
+var float pending_sh     = na
+var float pending_sl     = na
+var int   pending_sh_bar = na
+var int   pending_sl_bar = na
+
+var bool choch_found      = false
+var bool wait_rejection   = false
+
+// ─── LÓGICA PRINCIPAL ─────────────────────────────────────────
+bool is_sh = f_is_sh(i_lookback)
+bool is_sl = f_is_sl(i_lookback)
+
+if is_sh
+    pending_sh     := high[i_lookback]
+    pending_sh_bar := bar_index - i_lookback
+
+if is_sl
+    pending_sl     := low[i_lookback]
+    pending_sl_bar := bar_index - i_lookback
+
+if not na(pending_sh) and not na(pending_sl)
+    bool bull = pending_sl_bar < pending_sh_bar
+    g_frac  := FSZ_Fractal.new(pending_sh, pending_sl, pending_sh_bar, pending_sl_bar, bull)
+    g_fibo  := FSZ_FiboZone.new(0.0, 0.0, 0.0, 0.0, "", false)
+    g_fibo.fz_calc(pending_sh, pending_sl, bull)
+    g_conf  := na
+    choch_found   := false
+    wait_rejection := false
+    pending_sh     := na
+    pending_sl     := na
+    pending_sh_bar := na
+    pending_sl_bar := na
+
+bool piz = not na(g_fibo) ? g_fibo.fz_check(close) : false
+
+if piz and not na(g_fibo) and not na(g_frac)
+    bool bull = g_frac.is_bullish
+    [ob_f, ob_h, ob_l] = f_ob(g_fibo.zone_top, g_fibo.zone_bottom, i_ob_lb, bull)
+    [fvg_f, fvg_h, fvg_l] = f_fvg(g_fibo.zone_top, g_fibo.zone_bottom)
+    [piv_f, piv_l] = f_pivot(g_fibo.zone_top, g_fibo.zone_bottom)
+    g_conf := FSZ_Confluence.new(ob_f, fvg_f, piv_f, ob_h, ob_l, 0, false)
+    g_conf.conf_update(i_min_conf)
+    if g_conf.is_valid and not choch_found
+        choch_found := false
+
+if not na(g_conf) and g_conf.is_valid and not choch_found and not na(g_frac)
+    [cf, cl] = f_choch(g_frac.is_bullish, g_fibo.zone_top, g_fibo.zone_bottom)
+    if cf
+        choch_found    := true
+        wait_rejection := true
+
+if wait_rejection and not na(g_frac) and piz
+    bool bull = g_frac.is_bullish
+    [rf, rtype] = f_rejection(bull, i_wick_rat)
+    if rf
+        float sl_ref = not na(g_conf) and g_conf.ob_detected ? (bull ? g_conf.ob_low : g_conf.ob_high) : (bull ? g_fibo.zone_bottom : g_fibo.zone_top)
+        g_signal := FSZ_Signal.new(bull, 0.0, 0.0, 0.0, 0.0, 0.0, 0, "", false, false, false, false, false)
+        g_signal.sig_calc(close, sl_ref, bull, i_rr_tp1, i_rr_tp2, rtype)
+        wait_rejection := false
+
+if not na(g_signal) and g_signal.active
+    g_signal.sig_update()
+
+// ─── VISUALIZACIÓN ────────────────────────────────────────────
+plotshape(is_sh, "SH", shape.triangledown, location.abovebar, color.new(color.red,  0), size = size.tiny)
+plotshape(is_sl, "SL", shape.triangleup,   location.belowbar, color.new(color.blue, 0), size = size.tiny)
+bgcolor(piz ? color.new(color.yellow, 93) : na)
+bgcolor(choch_found ? color.new(color.green, 90) : na, title = "CHoCH detectado")
+
+bool buy_sig  = not na(g_signal) and g_signal.is_long      and g_signal.bar_entry == bar_index
+bool sell_sig = not na(g_signal) and not g_signal.is_long  and g_signal.bar_entry == bar_index
+plotshape(buy_sig,  "BUY",  shape.arrowup,   location.belowbar, color.new(color.lime, 0), size = size.normal)
+plotshape(sell_sig, "SELL", shape.arrowdown,  location.abovebar, color.new(color.red,  0), size = size.normal)
+
+if not na(g_fibo) and i_show_zones and barstate.islast and not na(g_frac)
+    int lb = math.min(g_frac.bar_high, g_frac.bar_low)
+    box.new(lb, g_fibo.zone_top, bar_index + 10, g_fibo.zone_bottom, border_color = color.yellow, bgcolor = color.new(color.yellow, 85), border_width = 1, border_style = line.style_dashed)
+
+if not na(g_signal) and barstate.islast
+    FSZ_Signal sig = g_signal
+    if sig.active or bar_index - sig.bar_entry < 50
+        int rb = bar_index + 30
+        int lb = sig.bar_entry
+        line.new(lb, sig.entry_price, rb, sig.entry_price, color = color.white,              width = 2)
+        line.new(lb, sig.stop_loss,   rb, sig.stop_loss,   color = color.red,                width = 2, style = line.style_dashed)
+        line.new(lb, sig.tp1,         rb, sig.tp1,         color = color.new(color.lime, 40), width = 1, style = line.style_dashed)
+        line.new(lb, sig.tp2,         rb, sig.tp2,         color = color.lime,               width = 2)
+        label.new(rb, sig.entry_price, "ENTRY",                           style = label.style_label_left, color = color.new(color.white,  60), textcolor = color.white, size = size.tiny)
+        label.new(rb, sig.stop_loss,   "SL",                              style = label.style_label_left, color = color.new(color.red,    60), textcolor = color.red,   size = size.tiny)
+        label.new(rb, sig.tp1,         "TP1 1:" + str.tostring(i_rr_tp1, "#.#"), style = label.style_label_left, color = color.new(color.lime, 70), textcolor = color.lime, size = size.tiny)
+        label.new(rb, sig.tp2,         "TP2 1:" + str.tostring(i_rr_tp2, "#.#"), style = label.style_label_left, color = color.new(color.lime, 40), textcolor = color.lime, size = size.tiny)
+
+// ─── TABLA DE ESTADO ──────────────────────────────────────────
+var table tbl = table.new(position.top_right, 2, 10, bgcolor = color.new(color.black, 85), border_color = color.gray, border_width = 1)
+
+if barstate.islast
+    table.cell(tbl, 0, 0, "FSZ v4 Senal",  text_color = color.white, text_size = size.small)
+    table.cell(tbl, 1, 0, "",               text_color = color.white, text_size = size.small)
+    if not na(g_frac)
+        table.cell(tbl, 0, 1, "Estructura",    text_color = color.gray, text_size = size.tiny)
+        table.cell(tbl, 1, 1, g_frac.is_bullish ? "ALCISTA" : "BAJISTA", text_color = g_frac.is_bullish ? color.lime : color.red, text_size = size.tiny)
+    if not na(g_conf)
+        table.cell(tbl, 0, 2, "Confluencias",  text_color = color.gray, text_size = size.tiny)
+        table.cell(tbl, 1, 2, str.tostring(g_conf.score) + "/" + str.tostring(i_min_conf), text_color = g_conf.is_valid ? color.lime : color.orange, text_size = size.tiny)
+    table.cell(tbl, 0, 3, "CHoCH",         text_color = color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 3, choch_found ? "DETECTADO" : "esperando", text_color = choch_found ? color.lime : color.gray, text_size = size.tiny)
+    table.cell(tbl, 0, 4, "Rechazo",       text_color = color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 4, wait_rejection ? "esperando" : (not na(g_signal) ? "OK" : "-"), text_color = not na(g_signal) ? color.lime : color.gray, text_size = size.tiny)
+    if not na(g_signal)
+        FSZ_Signal sig = g_signal
+        table.cell(tbl, 0, 5, "Entry",        text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 5, str.tostring(sig.entry_price, "#.####"),  text_color = color.white,  text_size = size.tiny)
+        table.cell(tbl, 0, 6, "Stop Loss",    text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 6, str.tostring(sig.stop_loss, "#.####"),    text_color = color.red,    text_size = size.tiny)
+        table.cell(tbl, 0, 7, "TP1",          text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 7, str.tostring(sig.tp1, "#.##"),            text_color = color.yellow, text_size = size.tiny)
+        table.cell(tbl, 0, 8, "TP2",          text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 8, str.tostring(sig.tp2, "#.##"),            text_color = color.lime,   text_size = size.tiny)
+        table.cell(tbl, 0, 9, "Estado",       text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 9, sig.sig_status(), text_color = sig.active ? color.white : sig.tp2_hit ? color.lime : sig.sl_hit ? color.red : color.orange, text_size = size.tiny)
+
+alertcondition(buy_sig,  "FSZ LONG",  "FSZ: Senal COMPRA. Entry={{close}}")
+alertcondition(sell_sig, "FSZ SHORT", "FSZ: Senal VENTA. Entry={{close}}")
