@@ -1,0 +1,226 @@
+// ============================================================
+// FRACTAL SMART ZONEZ — by Vic-Forex
+// VERSION 3: Confluencias dentro de la Zona FIBO
+// NUEVO: UDT FSZ_Confluence + OB, FVG, Pivot, Trend
+// PREREQUISITO: v2 aprobada
+// ============================================================
+//@version=6
+indicator("FSZ v3 — Confluencias", overlay = true, max_boxes_count = 200, max_lines_count = 200, max_labels_count = 100)
+
+// ─── INPUTS ───────────────────────────────────────────────────
+int   i_lookback  = input.int(5,    "Lookback Fractal",      minval = 2, maxval = 10, group = "Fractales")
+int   i_ob_lb     = input.int(3,    "Lookback Order Block",  minval = 1, maxval = 10, group = "Confluencias")
+float i_fvg_min   = input.float(0.0,"FVG tamano minimo",                               group = "Confluencias")
+int   i_min_conf  = input.int(2,    "Confluencias minimas",  minval = 1, maxval = 4,  group = "Confluencias")
+bool  i_show_ob   = input.bool(true, "Mostrar Order Blocks",                            group = "Visual")
+bool  i_show_fvg  = input.bool(true, "Mostrar FVG",                                    group = "Visual")
+bool  i_show_piv  = input.bool(true, "Mostrar Pivot Zones",                            group = "Visual")
+
+// ─── UDT: FRACTAL ─────────────────────────────────────────────
+type FSZ_Fractal
+    float swing_high
+    float swing_low
+    int   bar_high
+    int   bar_low
+    bool  is_bullish
+
+// ─── UDT: FIBO ZONE ───────────────────────────────────────────
+type FSZ_FiboZone
+    float zone_top
+    float zone_bottom
+    float level_50
+    float level_618
+    string direction
+    bool  price_in_zone
+
+method fz_calc(FSZ_FiboZone self, float sh, float sl, bool bull) =>
+    float r = sh - sl
+    if bull
+        self.level_50    := sh - r * 0.500
+        self.level_618   := sh - r * 0.618
+        self.zone_top    := self.level_50
+        self.zone_bottom := self.level_618
+        self.direction   := "bullish"
+    else
+        self.level_50    := sl + r * 0.500
+        self.level_618   := sl + r * 0.618
+        self.zone_top    := self.level_618
+        self.zone_bottom := self.level_50
+        self.direction   := "bearish"
+
+method fz_check(FSZ_FiboZone self, float price) =>
+    self.price_in_zone := price >= self.zone_bottom and price <= self.zone_top
+    self.price_in_zone
+
+// ─── UDT: CONFLUENCE ──────────────────────────────────────────
+type FSZ_Confluence
+    bool  ob_detected
+    bool  fvg_detected
+    bool  pivot_detected
+    bool  trend_detected
+    float ob_high
+    float ob_low
+    float fvg_high
+    float fvg_low
+    float pivot_level
+    int   score
+    bool  is_valid
+
+method conf_update(FSZ_Confluence self, int min_s) =>
+    self.score    := (self.ob_detected    ? 1 : 0)
+                   + (self.fvg_detected   ? 1 : 0)
+                   + (self.pivot_detected ? 1 : 0)
+                   + (self.trend_detected ? 1 : 0)
+    self.is_valid := self.score >= min_s
+
+// ─── FUNCIONES DE DETECCIÓN ───────────────────────────────────
+f_is_sh(int lb) =>
+    bool ok = true
+    for i = 1 to lb
+        if high[lb] < high[lb - i] or high[lb] < high[lb + i]
+            ok := false
+    ok
+
+f_is_sl(int lb) =>
+    bool ok = true
+    for i = 1 to lb
+        if low[lb] > low[lb - i] or low[lb] > low[lb + i]
+            ok := false
+    ok
+
+f_detect_ob(float zt, float zb, int lb, bool bull) =>
+    bool  found = false
+    float oh    = 0.0
+    float ol    = 0.0
+    for i = 1 to lb * 3
+        bool ov = high[i] >= zb and low[i] <= zt
+        if bull and close[i] < open[i] and ov and not found
+            found := true
+            oh    := high[i]
+            ol    := low[i]
+        if not bull and close[i] > open[i] and ov and not found
+            found := true
+            oh    := high[i]
+            ol    := low[i]
+    [found, oh, ol]
+
+f_detect_fvg(float zt, float zb, float min_sz) =>
+    bool  found = false
+    float fh    = 0.0
+    float fl    = 0.0
+    for i = 1 to 20
+        if low[i - 1] > high[i + 1]
+            float sz = low[i - 1] - high[i + 1]
+            bool ov  = low[i - 1] >= zb and high[i + 1] <= zt
+            if ov and sz >= min_sz and not found
+                found := true
+                fh    := low[i - 1]
+                fl    := high[i + 1]
+    [found, fh, fl]
+
+f_detect_pivot(float zt, float zb) =>
+    bool  found = false
+    float lvl   = 0.0
+    for i = 20 to 150
+        if high[i] >= zb and high[i] <= zt and not found
+            found := true
+            lvl   := high[i]
+        if low[i] >= zb and low[i] <= zt and not found
+            found := true
+            lvl   := low[i]
+    [found, lvl]
+
+// ─── ESTADO GLOBAL ────────────────────────────────────────────
+var FSZ_Fractal    g_frac = na
+var FSZ_FiboZone   g_fibo = na
+var FSZ_Confluence g_conf = na
+
+var float pending_sh     = na
+var float pending_sl     = na
+var int   pending_sh_bar = na
+var int   pending_sl_bar = na
+
+// ─── LÓGICA BARRA A BARRA ─────────────────────────────────────
+bool is_sh = f_is_sh(i_lookback)
+bool is_sl = f_is_sl(i_lookback)
+
+if is_sh
+    pending_sh     := high[i_lookback]
+    pending_sh_bar := bar_index - i_lookback
+
+if is_sl
+    pending_sl     := low[i_lookback]
+    pending_sl_bar := bar_index - i_lookback
+
+if not na(pending_sh) and not na(pending_sl)
+    bool bull = pending_sl_bar < pending_sh_bar
+    g_frac := FSZ_Fractal.new(pending_sh, pending_sl, pending_sh_bar, pending_sl_bar, bull)
+    g_fibo := FSZ_FiboZone.new(0.0, 0.0, 0.0, 0.0, "", false)
+    g_fibo.fz_calc(pending_sh, pending_sl, bull)
+    g_conf := na
+    pending_sh     := na
+    pending_sl     := na
+    pending_sh_bar := na
+    pending_sl_bar := na
+
+bool piz = not na(g_fibo) ? g_fibo.fz_check(close) : false
+
+if piz and not na(g_fibo) and not na(g_frac)
+    bool bull = g_frac.is_bullish
+    [ob_f, ob_h, ob_l]    = f_detect_ob(g_fibo.zone_top, g_fibo.zone_bottom, i_ob_lb, bull)
+    [fvg_f, fvg_h, fvg_l] = f_detect_fvg(g_fibo.zone_top, g_fibo.zone_bottom, i_fvg_min)
+    [piv_f, piv_l]         = f_detect_pivot(g_fibo.zone_top, g_fibo.zone_bottom)
+    g_conf := FSZ_Confluence.new(ob_f, fvg_f, piv_f, false, ob_h, ob_l, fvg_h, fvg_l, piv_l, 0, false)
+    g_conf.conf_update(i_min_conf)
+
+bool conf_valid = not na(g_conf) and g_conf.is_valid
+
+// ─── VISUALIZACIÓN ────────────────────────────────────────────
+plotshape(is_sh, "SH", shape.triangledown, location.abovebar, color.new(color.red,  0), size = size.tiny)
+plotshape(is_sl, "SL", shape.triangleup,   location.belowbar, color.new(color.blue, 0), size = size.tiny)
+bgcolor(piz        ? color.new(color.yellow, 92) : na)
+bgcolor(conf_valid ? color.new(color.green,  88) : na, title = "Zona valida")
+
+if not na(g_fibo) and not na(g_frac) and barstate.islast
+    int lb = math.min(g_frac.bar_high, g_frac.bar_low)
+    int rb = bar_index + 15
+
+    box.new(lb, g_fibo.zone_top, rb, g_fibo.zone_bottom, border_color = color.yellow, bgcolor = color.new(color.yellow, 82), border_width = 1, border_style = line.style_dashed)
+
+    if i_show_ob and not na(g_conf) and g_conf.ob_detected
+        box.new(lb, g_conf.ob_high, rb, g_conf.ob_low, border_color = color.purple, bgcolor = color.new(color.purple, 75), border_width = 2)
+        label.new(rb, g_conf.ob_high, "OB", style = label.style_label_left, color = color.new(color.purple, 60), textcolor = color.white, size = size.tiny)
+
+    if i_show_fvg and not na(g_conf) and g_conf.fvg_detected
+        box.new(lb, g_conf.fvg_high, rb, g_conf.fvg_low, border_color = color.orange, bgcolor = color.new(color.orange, 75), border_width = 2)
+        label.new(rb, g_conf.fvg_high, "FVG", style = label.style_label_left, color = color.new(color.orange, 60), textcolor = color.white, size = size.tiny)
+
+    if i_show_piv and not na(g_conf) and g_conf.pivot_detected
+        line.new(lb, g_conf.pivot_level, rb, g_conf.pivot_level, color = color.new(color.aqua, 20), width = 2, style = line.style_dashed)
+        label.new(rb, g_conf.pivot_level, "PIVOT", style = label.style_label_left, color = color.new(color.aqua, 60), textcolor = color.white, size = size.tiny)
+
+// ─── TABLA DE ESTADO ──────────────────────────────────────────
+var table tbl = table.new(position.top_right, 2, 9, bgcolor = color.new(color.black, 85), border_color = color.gray, border_width = 1)
+
+if barstate.islast
+    table.cell(tbl, 0, 0, "FSZ v3 Confluencias", text_color = color.white, text_size = size.small)
+    table.cell(tbl, 1, 0, "",                     text_color = color.white, text_size = size.small)
+    if not na(g_conf)
+        color sc = g_conf.is_valid ? color.lime : color.orange
+        table.cell(tbl, 0, 1, "Score",         text_color = color.gray, text_size = size.tiny)
+        table.cell(tbl, 1, 1, str.tostring(g_conf.score) + "/" + str.tostring(i_min_conf), text_color = sc, text_size = size.tiny)
+        table.cell(tbl, 0, 2, "Zona valida",   text_color = color.gray, text_size = size.tiny)
+        table.cell(tbl, 1, 2, g_conf.is_valid ? "SI" : "NO", text_color = g_conf.is_valid ? color.lime : color.red, text_size = size.tiny)
+        table.cell(tbl, 0, 3, "Order Block",   text_color = color.gray, text_size = size.tiny)
+        table.cell(tbl, 1, 3, g_conf.ob_detected    ? "SI" : "-", text_color = g_conf.ob_detected    ? color.lime : color.gray, text_size = size.tiny)
+        table.cell(tbl, 0, 4, "FVG Imbalance", text_color = color.gray, text_size = size.tiny)
+        table.cell(tbl, 1, 4, g_conf.fvg_detected   ? "SI" : "-", text_color = g_conf.fvg_detected   ? color.lime : color.gray, text_size = size.tiny)
+        table.cell(tbl, 0, 5, "Pivot S/R",     text_color = color.gray, text_size = size.tiny)
+        table.cell(tbl, 1, 5, g_conf.pivot_detected ? "SI" : "-", text_color = g_conf.pivot_detected ? color.lime : color.gray, text_size = size.tiny)
+        table.cell(tbl, 0, 6, "Tendencia",     text_color = color.gray, text_size = size.tiny)
+        table.cell(tbl, 1, 6, g_conf.trend_detected ? "SI" : "-", text_color = g_conf.trend_detected ? color.lime : color.gray, text_size = size.tiny)
+    if not na(g_fibo)
+        table.cell(tbl, 0, 7, "Zona top",    text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 7, str.tostring(g_fibo.zone_top, "#.####"),  text_color = color.yellow, text_size = size.tiny)
+        table.cell(tbl, 0, 8, "Precio zona", text_color = color.gray,   text_size = size.tiny)
+        table.cell(tbl, 1, 8, piz ? "DENTRO" : "FUERA", text_color = piz ? color.lime : color.gray, text_size = size.tiny)
