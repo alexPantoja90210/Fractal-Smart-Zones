@@ -188,11 +188,14 @@ method setup_draw(FSZ_SetupState self, int right_bar, color col_bull, color col_
     int   R        = right_bar
     // Lineas de niveles
     self.ln_entry  := line.new(L, self.entry_price, R, self.entry_price, color = color.new(color.gray, 0), width = 2)
-    self.ln_sl     := line.new(L, self.stop_loss,   R, self.stop_loss,   color = color.new(col_bear,   0), width = 2)
+    color sl_col   = self.be_triggered ? color.new(color.orange, 0) : color.new(col_bear, 0)
+    self.ln_sl     := line.new(L, self.stop_loss,   R, self.stop_loss,   color = sl_col, width = 2)
     self.ln_tp1    := line.new(L, self.tp1,         R, self.tp1,         color = color.new(col_bull,   0), width = 1, style = line.style_dashed)
     self.ln_tp2    := line.new(L, self.tp2,         R, self.tp2,         color = color.new(col_bull,   0), width = 2)
     // Cajas de riesgo (entry->SL) y recompensa (entry->TP2)
-    self.bx_risk   := box.new(L, self.entry_price, R, self.stop_loss, bgcolor = color.new(col_bear, 88), border_color = color.new(col_bear, 55), border_width = 1)
+    color risk_bg  = self.be_triggered ? color.new(color.orange, 92) : color.new(col_bear, 88)
+    color risk_bd  = self.be_triggered ? color.new(color.orange, 60) : color.new(col_bear, 55)
+    self.bx_risk   := box.new(L, self.entry_price, R, self.stop_loss, bgcolor = risk_bg, border_color = risk_bd, border_width = 1)
     self.bx_rew    := box.new(L, self.entry_price, R, self.tp2,       bgcolor = color.new(col_bull, 91), border_color = color.new(col_bull, 55), border_width = 1)
     // Label con info completa
     string be_txt  = self.be_triggered ? "  [BE]" : ""
@@ -231,6 +234,7 @@ method setup_update(FSZ_SetupState self) =>
             else if high >= self.tp1 and not self.tp1_hit
                 self.tp1_hit      := true
                 self.be_triggered := true
+                self.stop_loss    := self.entry_price   // SL se mueve a BE (entry)
             else if low <= (self.be_triggered ? self.entry_price : self.stop_loss)
                 self.sl_hit    := not self.be_triggered
                 self.active    := false
@@ -243,6 +247,7 @@ method setup_update(FSZ_SetupState self) =>
             else if low <= self.tp1 and not self.tp1_hit
                 self.tp1_hit      := true
                 self.be_triggered := true
+                self.stop_loss    := self.entry_price   // SL se mueve a BE (entry)
             else if high >= (self.be_triggered ? self.entry_price : self.stop_loss)
                 self.sl_hit    := not self.be_triggered
                 self.active    := false
