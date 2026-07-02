@@ -476,12 +476,14 @@ if i_show_trade and g_trade.in_trade and barstate.islast
     // Stop Loss
     color tr_sl_col = tr.be_triggered ? color.orange : color.red
     line.new(lb, tr.stop_loss, rb, tr.stop_loss, color = tr_sl_col, width = 2, style = line.style_dashed)
-    string tr_sl_txt = tr.be_triggered ? "BE  " + str.tostring(tr.stop_loss, "#.####") : "SL  " + str.tostring(tr.stop_loss, "#.####")
+    float  tr_pip_sl  = math.abs(tr.entry_price - tr.stop_loss) * 10.0
+    string tr_sl_txt = tr.be_triggered ? "BE  " + str.tostring(tr.stop_loss, "#.####") + "  (" + str.tostring(tr_pip_sl, "#.#") + " pips)" : "SL  " + str.tostring(tr.stop_loss, "#.####") + "  (" + str.tostring(tr_pip_sl, "#.#") + " pips)"
     color  tr_sl_lc  = tr.be_triggered ? color.orange : color.red
     label.new(rb, tr.stop_loss, tr_sl_txt, style = label.style_label_left, color = color.new(tr_sl_lc, 50), textcolor = tr_sl_lc, size = size.tiny)
     // TP1
     line.new(lb, tr.tp1, rb, tr.tp1, color = color.new(color.lime, 30), width = 1, style = line.style_dashed)
-    label.new(rb, tr.tp1, "TP1 1:" + str.tostring(i_rr_tp1, "#.#") + "  " + str.tostring(tr.tp1, "#.####"), style = label.style_label_left, color = color.new(color.lime, 60), textcolor = color.lime, size = size.tiny)
+    float  tr_pip_tp1 = math.abs(tr.tp1 - tr.entry_price) * 10.0
+    label.new(rb, tr.tp1, "TP1 1:" + str.tostring(i_rr_tp1, "#.#") + "  " + str.tostring(tr.tp1, "#.####") + "  (" + str.tostring(tr_pip_tp1, "#.#") + " pips)", style = label.style_label_left, color = color.new(color.lime, 60), textcolor = color.lime, size = size.tiny)
     // TP2
     line.new(lb, tr.tp2, rb, tr.tp2, color = color.lime, width = 2)
     label.new(rb, tr.tp2, "TP2 1:" + str.tostring(i_rr_tp2, "#.#") + "  " + str.tostring(tr.tp2, "#.####"), style = label.style_label_left, color = color.new(color.lime, 40), textcolor = color.lime, size = size.tiny)
@@ -495,8 +497,8 @@ var table tbl_s = table.new(position.bottom_right, 2, 12, bgcolor = color.new(co
 
 if barstate.islast and i_show_stats
     FSZ_BacktestStats s = g_stats
-    table.cell(tbl_s, 0, 0,  "FSZ v5 Stats",  text_color = color.white,  text_size = size.small)
-    table.cell(tbl_s, 1, 0,  "Backtest",       text_color = color.gray,   text_size = size.tiny)
+    table.cell(tbl_s, 0, 0,  "FSZ v5 — Alex Pantoja", text_color = color.white, text_size = size.small)
+    table.cell(tbl_s, 1, 0,  "Estado",                  text_color = color.new(color.gray, 30), text_size = size.small)
     table.cell(tbl_s, 0, 1,  "Total trades",   text_color = color.gray,   text_size = size.tiny)
     table.cell(tbl_s, 1, 1,  str.tostring(s.total_trades), text_color = color.white, text_size = size.tiny)
     table.cell(tbl_s, 0, 2,  "Win rate",       text_color = color.gray,   text_size = size.tiny)

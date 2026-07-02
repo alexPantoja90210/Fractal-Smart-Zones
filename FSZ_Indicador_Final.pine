@@ -575,12 +575,12 @@ if barstate.islast and not na(g_frac) and not na(g_fibo)
 // ═══════════════════════════════════════════════════════════════
 // TABLA DE ESTADO EN TIEMPO REAL
 // ═══════════════════════════════════════════════════════════════
-var table tbl = table.new(position.top_right, 2, 12, bgcolor = color.new(color.black, 80), border_color = color.new(color.gray, 45), border_width = 1)
+var table tbl = table.new(position.top_right, 2, 14, bgcolor = color.new(color.black, 80), border_color = color.new(color.gray, 45), border_width = 1)
 
 if i_show_table
     // Encabezado
     table.cell(tbl, 0, 0, "FSZ — Alex Pantoja",  text_color = color.white, text_size = size.small)
-    table.cell(tbl, 1, 0, "",                     text_color = color.white, text_size = size.small)
+    table.cell(tbl, 1, 0, "Estado",               text_color = color.new(color.gray, 30), text_size = size.small)
 
     // Fractal
     bool has_frac = not na(g_frac)
@@ -604,26 +604,41 @@ if i_show_table
     table.cell(tbl, 0, 6, "OB / FVG / PIV", text_color = color.white, text_size = size.tiny)
     table.cell(tbl, 1, 6, (has_conf and g_conf.ob_detected ? "OB " : "- ") + (has_conf and g_conf.fvg_detected ? "FVG " : "- ") + (has_conf and g_conf.pivot_detected ? "PIV" : "-"), text_color = sc, text_size = size.tiny)
 
-    // CHoCH
+    // CHoCH — verde si alcista, rojo si bajista
+    bool  choch_bull = not na(g_frac) and g_frac.is_bullish
+    color choch_col  = choch_found ? (choch_bull ? color.lime : color.red) : color.gray
+    string choch_txt = choch_found ? (choch_bull ? "ALCISTA" : "BAJISTA") : wait_rej ? "esperando" : "---"
     table.cell(tbl, 0, 7, "CHoCH",          text_color = color.white, text_size = size.tiny)
-    table.cell(tbl, 1, 7, choch_found ? "DETECTADO" : wait_rej ? "esperando" : "---", text_color = choch_found ? color.lime : color.gray, text_size = size.tiny)
+    table.cell(tbl, 1, 7, choch_txt, text_color = choch_col, text_size = size.tiny)
 
-    // Trade: SOLO mostrar si hay trade ACTIVO en este momento.
-    // El historial se ve en el grafico (paneles visuales).
-    // El dashboard refleja el estado en tiempo real.
-    bool is_active = g_setup.active
+    // Señal — BUY verde / SELL rojo (debajo del CHoCH)
+    bool   is_active   = g_setup.active
+    string sig_dir     = is_active ? (g_setup.is_long ? "▲ BUY" : "▼ SELL") : "---"
+    color  sig_dir_col = is_active ? (g_setup.is_long ? color.lime : color.red) : color.gray
+    table.cell(tbl, 0, 8, "Señal",          text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 1, 8, sig_dir, text_color = sig_dir_col, text_size = size.tiny)
+
+    // Trade
     color sig_col  = is_active ? (g_setup.be_triggered ? color.orange : color.white) : color.gray
     string t_status = is_active ? g_setup.setup_status() : "---"
-    table.cell(tbl, 0, 8, "Trade",          text_color = color.white, text_size = size.tiny)
-    table.cell(tbl, 1, 8, t_status, text_color = sig_col, text_size = size.tiny)
+    table.cell(tbl, 0, 9, "Trade",          text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 1, 9, t_status, text_color = sig_col, text_size = size.tiny)
 
-    table.cell(tbl, 0, 9, "Entry",          text_color = color.white, text_size = size.tiny)
-    table.cell(tbl, 1, 9, is_active ? str.tostring(g_setup.entry_price, "#.####") : "---", text_color = color.white, text_size = size.tiny)
-    table.cell(tbl, 0, 10, "SL",            text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 0, 10, "Entry",         text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 1, 10, is_active ? str.tostring(g_setup.entry_price, "#.####") : "---", text_color = color.white, text_size = size.tiny)
     color sl_col = is_active ? (g_setup.be_triggered ? color.orange : color.red) : color.gray
-    table.cell(tbl, 1, 10, is_active ? str.tostring(g_setup.stop_loss, "#.####") : "---", text_color = sl_col, text_size = size.tiny)
-    table.cell(tbl, 0, 11, "TP1 / TP2",    text_color = color.white, text_size = size.tiny)
-    table.cell(tbl, 1, 11, is_active ? str.tostring(g_setup.tp1, "#.##") + " / " + str.tostring(g_setup.tp2, "#.##") : "---", text_color = is_active ? color.lime : color.gray, text_size = size.tiny)
+    table.cell(tbl, 0, 11, "SL",            text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 1, 11, is_active ? str.tostring(g_setup.stop_loss, "#.####") : "---", text_color = sl_col, text_size = size.tiny)
+    table.cell(tbl, 0, 12, "TP1 / TP2",    text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 1, 12, is_active ? str.tostring(g_setup.tp1, "#.##") + " / " + str.tostring(g_setup.tp2, "#.##") : "---", text_color = is_active ? color.lime : color.gray, text_size = size.tiny)
+
+    // Pips — distancia entry→SL y entry→TP1 en pips (precio * 10)
+    float pip_sl  = is_active ? math.abs(g_setup.entry_price - g_setup.stop_loss) * 10.0 : 0.0
+    float pip_tp1 = is_active ? math.abs(g_setup.tp1 - g_setup.entry_price) * 10.0 : 0.0
+    string pips_txt = is_active ? "SL " + str.tostring(pip_sl, "#.#") + " / TP1 " + str.tostring(pip_tp1, "#.#") : "---"
+    color  pips_col = is_active ? color.white : color.gray
+    table.cell(tbl, 0, 13, "Pips",          text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 1, 13, pips_txt, text_color = pips_col, text_size = size.tiny)
 
 
 // ═══════════════════════════════════════════════════════════════
