@@ -12,6 +12,10 @@ int   i_ob_lb      = input.int(3,    "Lookback OB",          minval = 1, maxval 
 float i_fvg_min    = input.float(0.0,"FVG min (puntos)",                                 group = "2 Confluencias")
 int   i_min_conf   = input.int(2,    "Confluencias min",     minval = 1, maxval = 4,    group = "2 Confluencias")
 float i_wick_rat   = input.float(0.6,"Ratio mecha rechazo",  minval = 0.3, maxval = 0.9, group = "3 Confirmacion")
+float i_fibo_l1    = input.float(50.0, "Nivel FIBO zona inicio (%)", minval = 30.0, maxval = 70.0, step = 0.5, group = "3b Fibo Niveles", tooltip = "Nivel superior de la zona dorada. Default: 50.0")
+float i_fibo_l2    = input.float(61.8, "Nivel FIBO zona fin (%)",    minval = 40.0, maxval = 80.0, step = 0.5, group = "3b Fibo Niveles", tooltip = "Nivel inferior de la zona dorada. Default: 61.8")
+float i_fibo_e1    = input.float(38.2, "Nivel externo 1 (%)",        minval = 10.0, maxval = 60.0, step = 0.5, group = "3b Fibo Niveles", tooltip = "Primer nivel externo. Default: 38.2")
+float i_fibo_e2    = input.float(78.6, "Nivel externo 2 (%)",        minval = 60.0, maxval = 95.0, step = 0.5, group = "3b Fibo Niveles", tooltip = "Segundo nivel externo. Default: 78.6")
 float i_rr_tp1     = input.float(2.0,"RR TP1",               minval = 1.0, step = 0.5,  group = "4 Gestion")
 float i_rr_tp2     = input.float(4.0,"RR TP2",               minval = 2.0, step = 0.5,  group = "4 Gestion")
 float i_sl_buf     = input.float(0.1,"SL buffer pct",        minval = 0.0, step = 0.05, group = "4 Gestion")
@@ -52,21 +56,25 @@ type FSZ_FiboZone
     string direction
     bool  price_in_zone
 
-method fz_calc(FSZ_FiboZone self, float sh, float sl, bool bull) =>
-    float r = sh - sl
+method fz_calc(FSZ_FiboZone self, float sh, float sl, bool bull, float l1, float l2, float e1, float e2) =>
+    float r   = sh - sl
+    float f1  = l1 / 100.0
+    float f2  = l2 / 100.0
+    float fe1 = e1 / 100.0
+    float fe2 = e2 / 100.0
     if bull
-        self.level_382   := sh - r * 0.382
-        self.level_50    := sh - r * 0.500
-        self.level_618   := sh - r * 0.618
-        self.level_786   := sh - r * 0.786
+        self.level_382   := sh - r * fe1
+        self.level_50    := sh - r * f1
+        self.level_618   := sh - r * f2
+        self.level_786   := sh - r * fe2
         self.zone_top    := self.level_50
         self.zone_bottom := self.level_618
         self.direction   := "bullish"
     else
-        self.level_382   := sl + r * 0.382
-        self.level_50    := sl + r * 0.500
-        self.level_618   := sl + r * 0.618
-        self.level_786   := sl + r * 0.786
+        self.level_382   := sl + r * fe1
+        self.level_50    := sl + r * f1
+        self.level_618   := sl + r * f2
+        self.level_786   := sl + r * fe2
         self.zone_top    := self.level_618
         self.zone_bottom := self.level_50
         self.direction   := "bearish"
@@ -310,7 +318,7 @@ if not na(pending_sh) and not na(pending_sl) and not g_trade.in_trade
     bool bull = pending_sl_bar < pending_sh_bar
     g_frac := FSZ_Fractal.new(pending_sh, pending_sl, pending_sh_bar, pending_sl_bar, bull)
     g_fibo := FSZ_FiboZone.new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "", false)
-    g_fibo.fz_calc(pending_sh, pending_sl, bull)
+    g_fibo.fz_calc(pending_sh, pending_sl, bull, i_fibo_l1, i_fibo_l2, i_fibo_e1, i_fibo_e2)
     g_conf      := na
     choch_found := false
     wait_rej    := false
@@ -428,10 +436,10 @@ if barstate.islast and not na(g_frac) and not na(g_fibo)
         line.new(frac_left, g_fibo.level_618, zone_right, g_fibo.level_618, color = color.new(color.yellow, 10), width = 2)
         line.new(frac_left, g_fibo.level_786, zone_right, g_fibo.level_786, color = color.new(color.gray,   40), width = 1, style = line.style_dotted)
         // Labels niveles
-        label.new(zone_right, g_fibo.level_50,  "50.0%",  style = label.style_label_left, color = color.new(color.yellow, 50), textcolor = color.yellow, size = size.tiny)
-        label.new(zone_right, g_fibo.level_618, "61.8%",  style = label.style_label_left, color = color.new(color.yellow, 50), textcolor = color.yellow, size = size.tiny)
-        label.new(zone_right, g_fibo.level_382, "38.2%",  style = label.style_label_left, color = color.new(color.gray,   60), textcolor = color.gray,   size = size.tiny)
-        label.new(zone_right, g_fibo.level_786, "78.6%",  style = label.style_label_left, color = color.new(color.gray,   60), textcolor = color.gray,   size = size.tiny)
+        label.new(zone_right, g_fibo.level_50,  str.tostring(i_fibo_l1, "#.#") + "%", style = label.style_label_left, color = color.new(color.yellow, 50), textcolor = color.yellow, size = size.tiny)
+        label.new(zone_right, g_fibo.level_618, str.tostring(i_fibo_l2, "#.#") + "%", style = label.style_label_left, color = color.new(color.yellow, 50), textcolor = color.yellow, size = size.tiny)
+        label.new(zone_right, g_fibo.level_382, str.tostring(i_fibo_e1, "#.#") + "%", style = label.style_label_left, color = color.new(color.gray,   60), textcolor = color.gray,   size = size.tiny)
+        label.new(zone_right, g_fibo.level_786, str.tostring(i_fibo_e2, "#.#") + "%", style = label.style_label_left, color = color.new(color.gray,   60), textcolor = color.gray,   size = size.tiny)
 
     // ── 3. ORDER BLOCK ────────────────────────────────────────
     if i_show_ob and not na(g_conf) and g_conf.ob_detected
