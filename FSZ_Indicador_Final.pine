@@ -43,7 +43,7 @@ float i_fibo_e2  = input.float(78.6,  "Nivel externo 2 (%)",        minval = 60.
 // ── 4. Gestion ────────────────────────────────────────────────
 float i_rr_tp1   = input.float(2.0, "RR TP1 (parcial 50%)",  minval = 1.0, step = 0.5, group = "4  Gestion")
 float i_rr_tp2   = input.float(4.0, "RR TP2 (restante 50%)", minval = 2.0, step = 0.5, group = "4  Gestion")
-float i_sl_buf   = input.float(0.1, "SL buffer (%)",          minval = 0.0, step = 0.05, group = "4  Gestion", tooltip = "Margen adicional bajo el OB para el Stop Loss")
+float i_sl_buf   = input.float(0.1, "SL buffer (%)",          minval = 0.0, step = 0.05, group = "4  Gestion", tooltip = "Buffer adicional bajo el OB expresado como % del riesgo total. Ej: 1.5 = agrega 1.5% del rango entry-OB como margen extra al SL")
 
 // ── 5. Visual ─────────────────────────────────────────────────
 bool i_show_frac    = input.bool(true,  "Mostrar Fractal Box",           group = "5  Visual")
@@ -150,6 +150,8 @@ type FSZ_SetupState
     float  tp2
     int    bar_entry
     int    bar_close         // barra donde cerro (fija el ancho historico)
+    int    time_entry        // timestamp de entrada (para xloc.bar_time)
+    int    time_close        // timestamp de cierre (para xloc.bar_time)
     bool   be_triggered
     bool   tp1_hit
     bool   tp2_hit
@@ -184,6 +186,8 @@ method setup_reset(FSZ_SetupState self) =>
     self.tp2          := 0.0
     self.bar_entry    := 0
     self.bar_close    := 0
+    self.time_entry   := 0
+    self.time_close   := 0
     self.be_triggered := false
     self.tp1_hit      := false
     self.tp2_hit      := false
@@ -191,22 +195,24 @@ method setup_reset(FSZ_SetupState self) =>
 
 // Dibujar/actualizar el panel visual.
 // rightBar = bar_index+ext si activo, bar_close si historico.
-method setup_draw(FSZ_SetupState self, int right_bar, color col_bull, color col_bear, float rr1, float rr2) =>
+// setup_draw usa xloc.bar_time para soportar trades muy antiguos
+// sin el limite de max_bars_back que afecta a xloc.bar_index.
+method setup_draw(FSZ_SetupState self, int right_time, color col_bull, color col_bear, float rr1, float rr2) =>
     self.setup_erase()
-    color tcol     = self.is_long ? col_bull : col_bear
-    int   L        = self.bar_entry
-    int   R        = right_bar
-    // Lineas de niveles
-    self.ln_entry  := line.new(L, self.entry_price, R, self.entry_price, color = color.new(color.gray, 0), width = 2)
-    color sl_col   = self.be_triggered ? color.new(color.orange, 0) : color.new(col_bear, 0)
-    self.ln_sl     := line.new(L, self.stop_loss,   R, self.stop_loss,   color = sl_col, width = 2)
-    self.ln_tp1    := line.new(L, self.tp1,         R, self.tp1,         color = color.new(col_bull,   0), width = 1, style = line.style_dashed)
-    self.ln_tp2    := line.new(L, self.tp2,         R, self.tp2,         color = color.new(col_bull,   0), width = 2)
-    // Cajas de riesgo (entry->SL) y recompensa (entry->TP2)
-    color risk_bg  = self.be_triggered ? color.new(color.orange, 92) : color.new(col_bear, 88)
-    color risk_bd  = self.be_triggered ? color.new(color.orange, 60) : color.new(col_bear, 55)
-    self.bx_risk   := box.new(L, self.entry_price, R, self.stop_loss, bgcolor = risk_bg, border_color = risk_bd, border_width = 1)
-    self.bx_rew    := box.new(L, self.entry_price, R, self.tp2,       bgcolor = color.new(col_bull, 91), border_color = color.new(col_bull, 55), border_width = 1)
+    color tcol    = self.is_long ? col_bull : col_bear
+    int   TL      = self.time_entry
+    int   TR      = right_time
+    // Lineas de niveles (xloc.bar_time evita RE10026)
+    self.ln_entry := line.new(TL, self.entry_price, TR, self.entry_price, xloc = xloc.bar_time, color = color.new(color.gray, 0), width = 2)
+    color sl_col  = self.be_triggered ? color.new(color.orange, 0) : color.new(col_bear, 0)
+    self.ln_sl    := line.new(TL, self.stop_loss,   TR, self.stop_loss,   xloc = xloc.bar_time, color = sl_col, width = 2)
+    self.ln_tp1   := line.new(TL, self.tp1,         TR, self.tp1,         xloc = xloc.bar_time, color = color.new(col_bull, 0), width = 1, style = line.style_dashed)
+    self.ln_tp2   := line.new(TL, self.tp2,         TR, self.tp2,         xloc = xloc.bar_time, color = color.new(col_bull, 0), width = 2)
+    // Cajas de riesgo y recompensa (xloc.bar_time)
+    color risk_bg = self.be_triggered ? color.new(color.orange, 92) : color.new(col_bear, 88)
+    color risk_bd = self.be_triggered ? color.new(color.orange, 60) : color.new(col_bear, 55)
+    self.bx_risk  := box.new(TL, self.entry_price, TR, self.stop_loss, xloc = xloc.bar_time, bgcolor = risk_bg,  border_color = risk_bd, border_width = 1)
+    self.bx_rew   := box.new(TL, self.entry_price, TR, self.tp2,       xloc = xloc.bar_time, bgcolor = color.new(col_bull, 91), border_color = color.new(col_bull, 55), border_width = 1)
     // Label con info completa
     string be_txt  = self.be_triggered ? "  [BE]" : ""
     string res_txt = self.sl_hit ? "  -> SL" : self.tp2_hit ? "  -> TP2" : self.tp1_hit ? "  -> TP1" : ""
@@ -214,7 +220,7 @@ method setup_draw(FSZ_SetupState self, int right_bar, color col_bull, color col_
     string info    = dir_txt + be_txt + res_txt + "\nEntry: " + str.tostring(self.entry_price, "#.####") + "\nSL:    " + str.tostring(self.stop_loss, "#.####") + "\nTP1:   " + str.tostring(self.tp1, "#.####") + "  (1:" + str.tostring(rr1, "#.#") + ")\nTP2:   " + str.tostring(self.tp2, "#.####") + "  (1:" + str.tostring(rr2, "#.#") + ")"
     string ls      = self.is_long ? label.style_label_up : label.style_label_down
     float  lb_pr   = self.is_long ? self.stop_loss : self.tp2
-    self.lb_info   := label.new(L, lb_pr, info, style = ls, color = color.new(tcol, 12), textcolor = color.white, size = size.small)
+    self.lb_info  := label.new(TL, lb_pr, info, xloc = xloc.bar_time, style = ls, color = color.new(tcol, 12), textcolor = color.white, size = size.small)
 
 // Abrir un nuevo trade
 method setup_enter(FSZ_SetupState self, bool long, float entry, float sl_ref, float rr1, float rr2) =>
@@ -222,7 +228,9 @@ method setup_enter(FSZ_SetupState self, bool long, float entry, float sl_ref, fl
     self.is_long      := long
     self.entry_price  := entry
     self.bar_entry    := bar_index
+    self.time_entry   := time        // guardar timestamp
     self.bar_close    := 0
+    self.time_close   := 0
     self.be_triggered := false
     self.tp1_hit      := false
     self.tp2_hit      := false
@@ -241,6 +249,7 @@ method setup_update(FSZ_SetupState self) =>
                 self.tp2_hit   := true
                 self.active    := false
                 self.bar_close := bar_index
+                self.time_close := time
             else if high >= self.tp1 and not self.tp1_hit
                 self.tp1_hit      := true
                 self.be_triggered := true
@@ -249,11 +258,13 @@ method setup_update(FSZ_SetupState self) =>
                 self.sl_hit    := not self.be_triggered
                 self.active    := false
                 self.bar_close := bar_index
+                self.time_close := time
         else
             if low <= self.tp2 and not self.tp2_hit
                 self.tp2_hit   := true
                 self.active    := false
                 self.bar_close := bar_index
+                self.time_close := time
             else if low <= self.tp1 and not self.tp1_hit
                 self.tp1_hit      := true
                 self.be_triggered := true
@@ -262,6 +273,7 @@ method setup_update(FSZ_SetupState self) =>
                 self.sl_hit    := not self.be_triggered
                 self.active    := false
                 self.bar_close := bar_index
+                self.time_close := time
     // Dummy bool al final: fuerza tipo de retorno consistente en todos los bloques
     self.active
 
@@ -375,7 +387,7 @@ var FSZ_FiboZone   g_fibo  = na
 var FSZ_Confluence g_conf  = na
 
 // Trade activo — se redibuja cada barra
-var FSZ_SetupState g_setup = FSZ_SetupState.new(false, false, 0.0, 0.0, 0.0, 0.0, 0, 0, false, false, false, false, na, na, na, na, na, na, na)
+var FSZ_SetupState g_setup = FSZ_SetupState.new(false, false, 0.0, 0.0, 0.0, 0.0, 0, 0, 0, 0, false, false, false, false, na, na, na, na, na, na, na)
 
 // Historial de trades cerrados — persisten con borde fijo en closeBar
 var array<FSZ_SetupState> g_history = array.new<FSZ_SetupState>()
@@ -412,8 +424,9 @@ if not na(pending_sh) and not na(pending_sl)
     g_conf      := na
     choch_found := false
     wait_rej    := false
-    // Solo resetear setup si NO hay trade activo (no interrumpir trade en curso)
-    if not g_setup.active
+    // Solo resetear si hay datos residuales (trade ya cerrado y reseteado
+    // en paso 7, pero por seguridad repetimos si aun tiene datos)
+    if not g_setup.active and g_setup.bar_entry > 0
         g_setup.setup_reset()
     pending_sh     := na
     pending_sl     := na
@@ -459,20 +472,19 @@ if g_setup.active
 // Al cerrar: copia el estado al historial con borde fijo en bar_close.
 // Si supera el maximo configurado, borra el mas antiguo (erase + shift).
 if just_closed
-    // Clonar el setup cerrado en un nuevo objeto para el historial
+    // Clonar datos del trade cerrado en el historial (antes del reset)
     FSZ_SetupState archived = FSZ_SetupState.new(
-         g_setup.active, g_setup.is_long,
+         false, g_setup.is_long,
          g_setup.entry_price, g_setup.stop_loss, g_setup.tp1, g_setup.tp2,
-         g_setup.bar_entry, g_setup.bar_close,
+         g_setup.bar_entry, g_setup.bar_close, g_setup.time_entry, g_setup.time_close,
          g_setup.be_triggered, g_setup.tp1_hit, g_setup.tp2_hit, g_setup.sl_hit,
          na, na, na, na, na, na, na)
-    // Dibujar el panel historico con borde fijo en bar_close
-    archived.setup_draw(g_setup.bar_close, c_bull, c_bear, i_rr_tp1, i_rr_tp2)
     array.push(g_history, archived)
-    // Limitar cantidad: borrar el mas antiguo si excede el maximo
+    // Limitar cantidad maxima
     if array.size(g_history) > i_max_trades
-        FSZ_SetupState oldest = array.shift(g_history)
-        oldest.setup_erase()
+        array.shift(g_history)
+    // Resetear setup inmediatamente — no esperar al nuevo fractal
+    g_setup.setup_reset()
 
 // ═══════════════════════════════════════════════════════════════
 // SENALES EN GRAFICO
@@ -490,10 +502,28 @@ bgcolor(i_show_bg and piz                 ? color.new(color.yellow, 93) : na, ti
 bgcolor(i_show_bg and choch_found and piz ? color.new(color.green,  90) : na, title = "CHoCH activo")
 
 // ═══════════════════════════════════════════════════════════════
-// PANEL DEL TRADE ACTIVO (se redibuja cada barra)
+// PANEL DEL TRADE ACTIVO (barstate.islast para persistencia)
 // ═══════════════════════════════════════════════════════════════
-if i_show_sig and g_setup.active
-    g_setup.setup_draw(bar_index + 45, c_bull, c_bear, i_rr_tp1, i_rr_tp2)
+// En Pine indicator(), los objetos line/box/label solo persisten
+// si se crean en la ultima barra. El panel activo se redibuja
+// aqui — borra los anteriores y crea los nuevos cada vez que
+// llega una nueva barra (realtime update).
+if i_show_sig and g_setup.active and barstate.islast
+    int tf_ms = timeframe.in_seconds() * 1000
+    g_setup.setup_draw(time + tf_ms * 45, c_bull, c_bear, i_rr_tp1, i_rr_tp2)
+
+// ═══════════════════════════════════════════════════════════════
+// HISTORIAL DE TRADES (redibujar todo en ultima barra)
+// ═══════════════════════════════════════════════════════════════
+// Todos los paneles historicos se recrean en barstate.islast.
+// Esto garantiza persistencia en indicator() sin perder objetos.
+if i_show_sig and barstate.islast and array.size(g_history) > 0
+    int hist_size = array.size(g_history)
+    for idx = 0 to hist_size - 1
+        FSZ_SetupState h = array.get(g_history, idx)
+        h.setup_erase()
+        int h_tf_ms = timeframe.in_seconds() * 1000
+        h.setup_draw(h.time_close + h_tf_ms * 8, c_bull, c_bear, i_rr_tp1, i_rr_tp2)
 
 // ═══════════════════════════════════════════════════════════════
 // VISUALIZACION DE ZONAS (solo en ultima barra)
@@ -547,7 +577,7 @@ if barstate.islast and not na(g_frac) and not na(g_fibo)
 // ═══════════════════════════════════════════════════════════════
 var table tbl = table.new(position.top_right, 2, 12, bgcolor = color.new(color.black, 80), border_color = color.new(color.gray, 45), border_width = 1)
 
-if barstate.islast and i_show_table
+if i_show_table
     // Encabezado
     table.cell(tbl, 0, 0, "FSZ — Alex Pantoja",  text_color = color.white, text_size = size.small)
     table.cell(tbl, 1, 0, "",                     text_color = color.white, text_size = size.small)
@@ -578,17 +608,22 @@ if barstate.islast and i_show_table
     table.cell(tbl, 0, 7, "CHoCH",          text_color = color.white, text_size = size.tiny)
     table.cell(tbl, 1, 7, choch_found ? "DETECTADO" : wait_rej ? "esperando" : "---", text_color = choch_found ? color.lime : color.gray, text_size = size.tiny)
 
-    // Trade activo
+    // Trade: SOLO mostrar si hay trade ACTIVO en este momento.
+    // El historial se ve en el grafico (paneles visuales).
+    // El dashboard refleja el estado en tiempo real.
+    bool is_active = g_setup.active
+    color sig_col  = is_active ? (g_setup.be_triggered ? color.orange : color.white) : color.gray
+    string t_status = is_active ? g_setup.setup_status() : "---"
     table.cell(tbl, 0, 8, "Trade",          text_color = color.white, text_size = size.tiny)
-    color sig_col = g_setup.active ? color.white : (g_setup.tp2_hit ? color.lime : (g_setup.tp1_hit ? color.yellow : (g_setup.sl_hit ? color.red : color.gray)))
-    table.cell(tbl, 1, 8, g_setup.active or g_setup.bar_entry > 0 ? g_setup.setup_status() : "---", text_color = sig_col, text_size = size.tiny)
+    table.cell(tbl, 1, 8, t_status, text_color = sig_col, text_size = size.tiny)
 
     table.cell(tbl, 0, 9, "Entry",          text_color = color.white, text_size = size.tiny)
-    table.cell(tbl, 1, 9, g_setup.active ? str.tostring(g_setup.entry_price, "#.####") : "---", text_color = color.white, text_size = size.tiny)
+    table.cell(tbl, 1, 9, is_active ? str.tostring(g_setup.entry_price, "#.####") : "---", text_color = color.white, text_size = size.tiny)
     table.cell(tbl, 0, 10, "SL",            text_color = color.white, text_size = size.tiny)
-    table.cell(tbl, 1, 10, g_setup.active ? str.tostring(g_setup.stop_loss, "#.####") : "---", text_color = color.red, text_size = size.tiny)
+    color sl_col = is_active ? (g_setup.be_triggered ? color.orange : color.red) : color.gray
+    table.cell(tbl, 1, 10, is_active ? str.tostring(g_setup.stop_loss, "#.####") : "---", text_color = sl_col, text_size = size.tiny)
     table.cell(tbl, 0, 11, "TP1 / TP2",    text_color = color.white, text_size = size.tiny)
-    table.cell(tbl, 1, 11, g_setup.active ? str.tostring(g_setup.tp1, "#.##") + " / " + str.tostring(g_setup.tp2, "#.##") : "---", text_color = color.lime, text_size = size.tiny)
+    table.cell(tbl, 1, 11, is_active ? str.tostring(g_setup.tp1, "#.##") + " / " + str.tostring(g_setup.tp2, "#.##") : "---", text_color = is_active ? color.lime : color.gray, text_size = size.tiny)
 
 
 // ═══════════════════════════════════════════════════════════════
